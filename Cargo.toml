@@ -9,6 +9,7 @@ description = "Unicode-safe text cleaning & typographic normalization for Rust"
 repository = "https://example.com/rehuman"
 keywords = ["unicode", "normalize", "cleanup", "whitespace", "quotes", "dashes", "ellipsis"]
 categories = ["text-processing", "parser-implementations"]
+default-run = "rehuman"
 
 [features]
 default = ["unorm"]
@@ -26,6 +27,10 @@ unicode-normalization = { version = "0.1", optional = true }
 [[bin]]
 name = "rehuman"
 path = "src/bin/rehuman.rs"
+
+[[bin]]
+name = "ishuman"
+path = "src/bin/ishuman.rs"
 
 [lib]
 name = "rehuman"

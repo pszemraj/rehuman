@@ -45,12 +45,15 @@ let b = humanize("“Quote”—and…more");          // humanize preset
 
 ## CLI
 
-This crate ships a `rehuman` command-line tool for quick one-off normalization.
+Two binaries ship with the crate:
 
-- `rehuman notes.txt` cleans a file (up to 5 MB) and prints the result to stdout. Redirect if you want to save: `rehuman notes.txt > notes.clean.txt`.
-- Pipe data the same way: `curl https://example.com | rehuman --stats`.
-- Default CLI behavior enforces keyboard-only output and drops emoji. Override with flags such as `--keep-emoji`, `--keyboard-only=false`, `--unicode-normalization nfkc`, or `--line-endings crlf`.
-- Set custom defaults by passing `--save-config`; the resolved options are stored under the platform config dir (e.g. `~/.config/rehuman/config.toml`). Use `--config <path>` to point at an alternative file.
+- `rehuman` cleans text. `cargo run -- <args>` runs it directly, or `cargo install --path .` makes it globally available.  
+  - `rehuman notes.txt` cleans a file (≤5 MB) and writes normalized text to stdout; redirect if you want a file: `rehuman notes.txt > notes.clean.txt`.
+  - Pipe data the same way: `curl https://example.com | rehuman --stats`. Stats are written to stderr so pipes stay clean.
+  - Defaults enforce keyboard-only output and drop emoji. Override with flags such as `--keep-emoji`, `--keyboard-only=false`, `--unicode-normalization nfkc`, or `--line-endings crlf`.
+  - Persist your preferred knobs with `--save-config`. Config lives under the platform config dir (e.g. `~/.config/rehuman/config.toml`); use `--config <path>` to point elsewhere.
+- `ishuman` checks whether text would change. It prints `1` when no normalization is needed and `0` otherwise.  
+  - `ishuman notes.txt` uses the same config/flags as `rehuman`. Add `--stats` for a breakdown (stderr) or `--exit-code` to surface the verdict via the process status.
 
 ## Feature flags
 
