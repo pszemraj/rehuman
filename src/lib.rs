@@ -198,6 +198,9 @@ impl TextCleaner {
         let collapse = self.options.collapse_whitespace;
 
         let default_ignorables = icu_sets::default_ignorable_code_point();
+        let emoji_set = icu_sets::emoji();
+        let emoji_presentation = icu_sets::emoji_presentation();
+        let extended_pictographic = icu_sets::extended_pictographic();
 
         for grapheme in UnicodeSegmentation::graphemes(working.as_str(), true) {
             let mut chars: Vec<char> = grapheme.chars().collect();
@@ -205,7 +208,13 @@ impl TextCleaner {
                 continue;
             }
 
-            let is_emoji_cluster = chars.iter().copied().any(is_emoji);
+            let emoji_context = classify_emoji_cluster(
+                &chars,
+                emoji_set,
+                emoji_presentation,
+                extended_pictographic,
+            );
+            let is_emoji_cluster = emoji_context.is_rendered;
 
             if self.options.keyboard_only
                 && matches!(self.options.emoji_policy, EmojiPolicy::Drop)
@@ -411,6 +420,49 @@ impl TextCleaner {
 
         true
     }
+}
+
+#[derive(Clone, Copy)]
+struct EmojiClusterContext {
+    is_rendered: bool,
+}
+
+fn classify_emoji_cluster(
+    chars: &[char],
+    emoji: icu_properties::sets::CodePointSetDataBorrowed<'static>,
+    emoji_presentation: icu_properties::sets::CodePointSetDataBorrowed<'static>,
+    extended_pictographic: icu_properties::sets::CodePointSetDataBorrowed<'static>,
+) -> EmojiClusterContext {
+    let mut has_emoji_presentation = false;
+    let mut has_extended_pictographic = false;
+    let mut has_emoji = false;
+    let mut has_vs16 = false;
+    let mut has_zwj = false;
+    let mut has_keycap = false;
+
+    for &c in chars {
+        if emoji_presentation.contains(c) {
+            has_emoji_presentation = true;
+        }
+        if extended_pictographic.contains(c) {
+            has_extended_pictographic = true;
+        }
+        if emoji.contains(c) {
+            has_emoji = true;
+        }
+        match c {
+            '\u{FE0F}' => has_vs16 = true,   // Variation Selector-16
+            '\u{200D}' => has_zwj = true,    // Zero Width Joiner
+            '\u{20E3}' => has_keycap = true, // Combining Enclosing Keycap
+            _ => {}
+        }
+    }
+
+    let is_rendered = has_emoji_presentation
+        || has_extended_pictographic
+        || (has_emoji && (has_vs16 || has_zwj || has_keycap));
+
+    EmojiClusterContext { is_rendered }
 }
 
 fn flush_pending_whitespace(out: &mut String, pending: usize, collapse: bool) {

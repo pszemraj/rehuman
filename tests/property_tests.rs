@@ -1,9 +1,46 @@
 use icu_properties::{maps, sets, GeneralCategory};
 use proptest::prelude::*;
 use rehuman::{clean, is_keyboard_ascii, CleaningOptions, EmojiPolicy, TextCleaner};
+use unicode_segmentation::UnicodeSegmentation;
 
 fn sample_string() -> impl Strategy<Value = String> {
     proptest::collection::vec(any::<char>(), 0..64).prop_map(|chars| chars.into_iter().collect())
+}
+
+fn grapheme_is_rendered_emoji(grapheme: &str) -> bool {
+    let chars: Vec<char> = grapheme.chars().collect();
+    let emoji = sets::emoji();
+    let emoji_presentation = sets::emoji_presentation();
+    let extended_pictographic = sets::extended_pictographic();
+
+    let mut has_emoji_presentation = false;
+    let mut has_extended_pictographic = false;
+    let mut has_emoji = false;
+    let mut has_vs16 = false;
+    let mut has_zwj = false;
+    let mut has_keycap = false;
+
+    for &c in &chars {
+        if emoji_presentation.contains(c) {
+            has_emoji_presentation = true;
+        }
+        if extended_pictographic.contains(c) {
+            has_extended_pictographic = true;
+        }
+        if emoji.contains(c) {
+            has_emoji = true;
+        }
+        match c {
+            '\u{FE0F}' => has_vs16 = true,
+            '\u{200D}' => has_zwj = true,
+            '\u{20E3}' => has_keycap = true,
+            _ => {}
+        }
+    }
+
+    has_emoji_presentation
+        || has_extended_pictographic
+        || (has_emoji && (has_vs16 || has_zwj || has_keycap))
 }
 
 #[test]
@@ -78,6 +115,41 @@ fn quotation_marks_normalize_to_ascii() {
     }
 }
 
+#[test]
+fn keyboard_only_keeps_plain_ascii_symbols() {
+    let cleaner = TextCleaner::new(CleaningOptions {
+        keyboard_only: true,
+        ..CleaningOptions::default()
+    });
+    let input = "#123 ABC xyz ~!@[](){}";
+    let output = cleaner.clean(input);
+    assert_eq!(output.text, input);
+    assert_eq!(output.stats.emojis_dropped, 0);
+    assert_eq!(output.stats.non_keyboard_removed, 0);
+}
+
+#[test]
+fn keyboard_only_drops_keycap_sequences() {
+    let cleaner = TextCleaner::new(CleaningOptions {
+        keyboard_only: true,
+        ..CleaningOptions::default()
+    });
+    let output = cleaner.clean("7️⃣");
+    assert_eq!(output.text, "");
+    assert!(output.stats.emojis_dropped >= 1);
+}
+
+#[test]
+fn keyboard_only_drops_zwj_emoji() {
+    let cleaner = TextCleaner::new(CleaningOptions {
+        keyboard_only: true,
+        ..CleaningOptions::default()
+    });
+    let output = cleaner.clean("👨‍👩‍👧‍👦");
+    assert_eq!(output.text, "");
+    assert!(output.stats.emojis_dropped >= 1);
+}
+
 proptest! {
     #[test]
     fn removing_hidden_characters_eliminates_default_ignorables(input in sample_string()) {
@@ -99,8 +171,9 @@ proptest! {
             ..CleaningOptions::default()
         });
         let output = cleaner.clean(&input);
-        let emoji_set = sets::emoji();
         prop_assert!(output.text.chars().all(is_keyboard_ascii));
-        prop_assert!(!output.text.chars().any(|c| emoji_set.contains(c)));
+        let has_rendered_emoji = UnicodeSegmentation::graphemes(output.text.as_str(), true)
+            .any(grapheme_is_rendered_emoji);
+        prop_assert!(!has_rendered_emoji);
     }
 }

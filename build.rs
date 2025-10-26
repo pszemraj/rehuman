@@ -49,7 +49,20 @@ fn main() {
         }
 
         if let Some(mapped) = map_quote(ch) {
-            if quotation_marks.contains(ch) || mapped == '"' || mapped == '\'' {
+            let is_override = matches!(
+                ch,
+                '\u{2032}' // PRIME
+                    | '\u{2033}' // DOUBLE PRIME
+                    | '\u{2034}' // TRIPLE PRIME
+                    | '\u{2035}' // REVERSED PRIME
+                    | '\u{2036}' // REVERSED DOUBLE PRIME
+                    | '\u{2037}' // REVERSED TRIPLE PRIME
+                    | '\u{300C}' // LEFT CORNER BRACKET
+                    | '\u{300D}' // RIGHT CORNER BRACKET
+                    | '\u{300E}' // LEFT WHITE CORNER BRACKET
+                    | '\u{300F}' // RIGHT WHITE CORNER BRACKET
+            );
+            if quotation_marks.contains(ch) || is_override {
                 match mapped {
                     '"' => {
                         quote_map.entry(ch, "'\"'");
@@ -92,7 +105,8 @@ fn classify_quote(name: &str) -> Option<char> {
         || upper.contains("REVERSING QUOTATION MARK")
         || (upper.contains("QUOTATION MARK") && !upper.contains("SINGLE"))
         || (upper.contains("ANGLE QUOTATION MARK") && !upper.contains("SINGLE"))
-        || (upper.contains("BRACKET") && (upper.contains("LEFT") || upper.contains("RIGHT")));
+        || upper.contains("CORNER BRACKET")
+        || upper.contains("WHITE CORNER BRACKET");
 
     if is_double {
         return Some('"');
