@@ -8,8 +8,8 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use rehuman::{
-    CleaningOptions, CleaningResult, CleaningStats, EmojiPolicy, LineEndingStyle, TextCleaner,
-    UnicodeNormalizationMode,
+    CleaningOptions, CleaningResult, CleaningStats, EmojiPolicy, LineEndingStyle, StreamCleaner,
+    TextCleaner, UnicodeNormalizationMode,
 };
 
 pub const MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
@@ -372,9 +372,9 @@ where
     R: BufRead,
     W: Write,
 {
-    let mut aggregate = CleaningStats::default();
-    let mut changes_made = 0u64;
+    let mut stream = StreamCleaner::new(cleaner.options().clone());
     let mut buffer = String::new();
+    let mut chunk_output = String::new();
 
     loop {
         buffer.clear();
@@ -384,19 +384,27 @@ where
         if bytes_read == 0 {
             break;
         }
-        let result = cleaner.clean(&buffer);
+        if let Some(result) = stream.feed(&buffer, &mut chunk_output) {
+            writer
+                .write_all(result.text.as_bytes())
+                .context("failed to write stream chunk")?;
+            chunk_output.clear();
+        }
+    }
+
+    if let Some(result) = stream.finish(&mut chunk_output) {
         writer
             .write_all(result.text.as_bytes())
             .context("failed to write stream chunk")?;
-        aggregate.accumulate(&result.stats);
-        changes_made = changes_made.saturating_add(result.changes_made);
+        chunk_output.clear();
     }
 
     writer.flush().context("failed to flush output stream")?;
 
+    let summary = stream.summary();
     Ok(StreamOutcome {
-        stats: aggregate,
-        changes_made,
+        stats: summary.stats,
+        changes_made: summary.changes_made,
     })
 }
 

@@ -1,6 +1,6 @@
 use icu_properties::{maps, sets, GeneralCategory};
 use proptest::prelude::*;
-use rehuman::{clean, is_keyboard_ascii, CleaningOptions, EmojiPolicy, TextCleaner};
+use rehuman::{clean, is_keyboard_ascii, CleaningOptions, EmojiPolicy, StreamCleaner, TextCleaner};
 use unicode_segmentation::UnicodeSegmentation;
 
 fn sample_string() -> impl Strategy<Value = String> {
@@ -184,5 +184,39 @@ proptest! {
         let has_rendered_emoji = UnicodeSegmentation::graphemes(output.text.as_ref(), true)
             .any(grapheme_is_rendered_emoji);
         prop_assert!(!has_rendered_emoji);
+    }
+}
+
+proptest! {
+    #[test]
+    fn stream_cleaner_matches_batch(input in sample_string()) {
+        let options = CleaningOptions::default();
+        let baseline_cleaner = TextCleaner::new(options.clone());
+        let baseline = baseline_cleaner.clean(&input);
+
+        let mut stream_cleaner = StreamCleaner::new(options);
+        let mut out_buffer = String::new();
+        let mut chunk_buffer = String::new();
+
+        for ch in input.chars() {
+            let chunk = ch.to_string();
+            if let Some(result) = stream_cleaner.feed(&chunk, &mut chunk_buffer) {
+                let emitted = result.text.to_owned();
+                out_buffer.push_str(&emitted);
+                chunk_buffer.clear();
+            }
+        }
+
+        if let Some(result) = stream_cleaner.finish(&mut chunk_buffer) {
+            let emitted = result.text.to_owned();
+            out_buffer.push_str(&emitted);
+            chunk_buffer.clear();
+        }
+
+        let summary = stream_cleaner.summary();
+
+        prop_assert_eq!(out_buffer, baseline.text);
+        prop_assert_eq!(summary.stats, baseline.stats);
+        prop_assert_eq!(summary.changes_made, baseline.changes_made);
     }
 }

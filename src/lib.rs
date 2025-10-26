@@ -320,6 +320,10 @@ impl TextCleaner {
         Self { options }
     }
 
+    pub fn options(&self) -> &CleaningOptions {
+        &self.options
+    }
+
     pub fn clean<'a>(&self, text: &'a str) -> CleaningResult<'a> {
         if text.is_empty() {
             return CleaningResult {
@@ -592,6 +596,98 @@ impl TextCleaner {
                 self.options.unicode_normalization,
                 UnicodeNormalizationMode::None
             )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamSummary {
+    pub stats: CleaningStats,
+    pub changes_made: u64,
+}
+
+pub struct StreamCleaner {
+    cleaner: TextCleaner,
+    buffer: String,
+    total_stats: CleaningStats,
+    total_changes: u64,
+}
+
+impl StreamCleaner {
+    pub fn new(options: CleaningOptions) -> Self {
+        Self {
+            cleaner: TextCleaner::new(options),
+            buffer: String::new(),
+            total_stats: CleaningStats::default(),
+            total_changes: 0,
+        }
+    }
+
+    pub fn from_cleaner(cleaner: TextCleaner) -> Self {
+        Self {
+            cleaner,
+            buffer: String::new(),
+            total_stats: CleaningStats::default(),
+            total_changes: 0,
+        }
+    }
+
+    pub fn feed<'out>(
+        &mut self,
+        chunk: &str,
+        out: &'out mut String,
+    ) -> Option<CleaningResult<'out>> {
+        out.clear();
+        if chunk.is_empty() {
+            return None;
+        }
+        self.buffer.push_str(chunk);
+        let last_nl = self.buffer.rfind('\n')?;
+        let flush_end = last_nl + 1;
+        let to_process = self.buffer[..flush_end].to_owned();
+        self.buffer.drain(..flush_end);
+        Some(self.process_owned_chunk(to_process, out))
+    }
+
+    pub fn finish<'out>(&mut self, out: &'out mut String) -> Option<CleaningResult<'out>> {
+        out.clear();
+        if self.buffer.is_empty() {
+            return None;
+        }
+        let remainder = std::mem::take(&mut self.buffer);
+        Some(self.process_owned_chunk(remainder, out))
+    }
+
+    pub fn summary(&self) -> StreamSummary {
+        StreamSummary {
+            stats: self.total_stats.clone(),
+            changes_made: self.total_changes,
+        }
+    }
+
+    fn process_owned_chunk<'out>(
+        &mut self,
+        chunk: String,
+        out: &'out mut String,
+    ) -> CleaningResult<'out> {
+        let result = self.cleaner.clean(&chunk);
+        let CleaningResult {
+            text,
+            changes_made,
+            stats,
+        } = result;
+
+        out.clear();
+        out.push_str(text.as_ref());
+        let emitted = &out[..];
+
+        self.total_stats.accumulate(&stats);
+        self.total_changes = self.total_changes.saturating_add(changes_made);
+
+        CleaningResult {
+            text: Cow::Borrowed(emitted),
+            changes_made,
+            stats,
+        }
     }
 }
 

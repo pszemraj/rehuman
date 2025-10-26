@@ -123,6 +123,34 @@ Use these metrics for monitoring, debugging, or reporting.
 
 For allocation-sensitive paths, call `TextCleaner::clean_into(input, &mut buffer)` to reuse an existing `String`. The function fills the provided buffer with the cleaned text and returns a `CleaningResult` whose `text` borrows from that buffer.
 
+## Streaming
+
+Use `StreamCleaner` to process arbitrarily chunked input while preserving the line-oriented semantics of the batch cleaner.
+
+```rust
+use rehuman::{CleaningOptions, StreamCleaner};
+
+let options = CleaningOptions::balanced();
+let mut stream = StreamCleaner::new(options);
+let mut chunk_output = String::new();
+
+for chunk in ["first line \n", "second", " line\n"] {
+    if let Some(result) = stream.feed(chunk, &mut chunk_output) {
+        let emitted = result.text.to_owned();
+        chunk_output.clear();
+        print!("{}", emitted);
+    }
+}
+
+if let Some(result) = stream.finish(&mut chunk_output) {
+    let emitted = result.text.to_owned();
+    print!("{}", emitted);
+}
+
+let summary = stream.summary();
+println!("changes: {}", summary.changes_made);
+```
+
 ## Feature Flags
 
 | Flag     | Default | Description                                                                                                                |
