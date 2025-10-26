@@ -191,7 +191,7 @@ impl Default for CleaningOptions {
             normalize_dashes: true,
             normalize_quotes: true,
             normalize_other: true,
-            keyboard_only: false,
+            keyboard_only: true,
             emoji_policy: EmojiPolicy::Drop,
             remove_control_chars: true,
             collapse_whitespace: false,
@@ -616,27 +616,33 @@ impl TextCleaner {
                 continue;
             }
 
-            if pending_ws > 0 {
-                flush_pending_whitespace(out, pending_ws, collapse);
-                pending_ws = 0;
-            }
-
             if self.options.keyboard_only {
                 let is_emoji_cluster = ensure_emoji_cluster(&mut emoji_classifier);
                 // TODO: offer an optional transliteration path when dropping non-ASCII characters.
-                if cluster_buffer.chars().all(is_keyboard_ascii)
-                    || (is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep))
-                {
+                let keep_cluster = cluster_buffer.chars().all(is_keyboard_ascii)
+                    || (is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep));
+
+                if keep_cluster {
+                    if pending_ws > 0 {
+                        flush_pending_whitespace(out, pending_ws, collapse);
+                        pending_ws = 0;
+                    }
                     out.push_str(&cluster_buffer);
                 } else if is_emoji_cluster {
                     record_change!(changes, stats, emojis_dropped);
+                    cluster_buffer.clear();
                 } else {
                     let removed = cluster_buffer.chars().count();
                     if removed > 0 {
                         record_change!(changes, stats, non_keyboard_removed, removed);
                     }
+                    cluster_buffer.clear();
                 }
             } else {
+                if pending_ws > 0 {
+                    flush_pending_whitespace(out, pending_ws, collapse);
+                    pending_ws = 0;
+                }
                 out.push_str(&cluster_buffer);
             }
         }
@@ -1023,12 +1029,13 @@ mod tests {
     #[test]
     fn default_cleaning_matches_keyboard_equivalent() {
         let out = clean("“Hello—world…”\u{00A0}😀");
-        assert_eq!(out.text, "\"Hello-world...\" 😀");
+        assert_eq!(out.text, "\"Hello-world...\"");
         assert_eq!(out.stats.quotes_normalized, 2);
         assert_eq!(out.stats.dashes_normalized, 1);
         assert_eq!(out.stats.other_normalized, 1);
         assert_eq!(out.stats.spaces_normalized, 1);
-        assert_eq!(out.changes_made, 5);
+        assert_eq!(out.stats.emojis_dropped, 1);
+        assert_eq!(out.changes_made, 7);
     }
 
     #[test]
@@ -1062,6 +1069,7 @@ mod tests {
 
         let cleaner = TextCleaner::new(CleaningOptions {
             remove_hidden: false,
+            keyboard_only: false,
             ..CleaningOptions::default()
         });
         let out = cleaner.clean(input);
@@ -1070,6 +1078,7 @@ mod tests {
 
         let cleaner = TextCleaner::new(CleaningOptions {
             normalize_spaces: false,
+            keyboard_only: false,
             ..CleaningOptions::default()
         });
         let out = cleaner.clean(input);
@@ -1098,9 +1107,10 @@ mod tests {
     fn ts_dashes_case() {
         let cleaner = TextCleaner::new(CleaningOptions::default());
         let out = cleaner.clean("I — super — man – 💪");
-        assert_eq!(out.text, "I - super - man - 💪");
+        assert_eq!(out.text, "I - super - man -");
         assert_eq!(out.stats.dashes_normalized, 3);
-        assert_eq!(out.changes_made, 3);
+        assert_eq!(out.stats.emojis_dropped, 1);
+        assert_eq!(out.changes_made, 5);
     }
 
     #[test]
@@ -1171,7 +1181,10 @@ mod tests {
 
     #[test]
     fn keeps_variation_selector_for_emoji() {
-        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let cleaner = TextCleaner::new(CleaningOptions {
+            keyboard_only: false,
+            ..CleaningOptions::default()
+        });
         let out = cleaner.clean("👍\u{FE0F}");
         assert_eq!(out.text, "👍\u{FE0F}");
         assert_eq!(out.stats.hidden_chars_removed, 0);

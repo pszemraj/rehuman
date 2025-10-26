@@ -75,7 +75,7 @@ use rehuman::clean;
 let cleaned = clean("Thanks 👍"); // -> "Thanks "
 ```
 
-Use `CleanConfig::allow_emoji(true)` if you need to preserve them.
+To keep emoji, construct a cleaner with `CleaningOptions::builder().keyboard_only(false)` (or pass `--keep-emoji` on the CLI).
 
 ### CLI
 
