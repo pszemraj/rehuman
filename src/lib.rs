@@ -3,6 +3,7 @@
 use icu_properties::sets as icu_sets;
 use serde::Serialize;
 use std::borrow::Cow;
+use std::fmt;
 #[cfg(feature = "unorm")]
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
@@ -70,6 +71,25 @@ pub struct CleaningResult<'a> {
     pub changes_made: u64,
     pub stats: CleaningStats,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleaningError {
+    NormalizationUnavailable { requested: UnicodeNormalizationMode },
+}
+
+impl fmt::Display for CleaningError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CleaningError::NormalizationUnavailable { requested } => write!(
+                f,
+                "Unicode normalization {:?} requested but the 'unorm' feature is disabled",
+                requested
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CleaningError {}
 
 #[cfg(feature = "stats")]
 impl CleaningStats {
@@ -363,29 +383,11 @@ impl TextCleaner {
     }
 
     pub fn clean<'a>(&self, text: &'a str) -> CleaningResult<'a> {
-        if text.is_empty() {
-            return CleaningResult {
-                text: Cow::Borrowed(text),
-                changes_made: 0,
-                stats: CleaningStats::default(),
-            };
-        }
-
-        if self.can_use_ascii_fast_path(text) {
-            return CleaningResult {
-                text: Cow::Borrowed(text),
-                changes_made: 0,
-                stats: CleaningStats::default(),
-            };
-        }
-
-        let mut buffer = String::with_capacity(text.len());
-        let (changes, stats) = self.clean_into_internal(text, &mut buffer);
-        CleaningResult {
-            text: Cow::Owned(buffer),
-            changes_made: changes,
-            stats,
-        }
+        self.try_clean(text).unwrap_or_else(|err| {
+            panic!(
+                "clean() failed: {err}. Enable the 'unorm' feature or call try_clean() to handle the error"
+            )
+        })
     }
 
     pub fn clean_into<'output>(
@@ -393,38 +395,82 @@ impl TextCleaner {
         text: &str,
         out: &'output mut String,
     ) -> CleaningResult<'output> {
+        self.try_clean_into(text, out).unwrap_or_else(|err| {
+            panic!(
+                "clean_into() failed: {err}. Enable the 'unorm' feature or call try_clean_into() to handle the error"
+            )
+        })
+    }
+
+    pub fn try_clean<'a>(&self, text: &'a str) -> Result<CleaningResult<'a>, CleaningError> {
+        if text.is_empty() {
+            return Ok(CleaningResult {
+                text: Cow::Borrowed(text),
+                changes_made: 0,
+                stats: CleaningStats::default(),
+            });
+        }
+
+        if self.can_use_ascii_fast_path(text) {
+            return Ok(CleaningResult {
+                text: Cow::Borrowed(text),
+                changes_made: 0,
+                stats: CleaningStats::default(),
+            });
+        }
+
+        let working = self.normalize_input(text)?;
+        let mut buffer = String::with_capacity(working.len());
+        let (changes, stats) = self.clean_into_internal(working, &mut buffer);
+        Ok(CleaningResult {
+            text: Cow::Owned(buffer),
+            changes_made: changes,
+            stats,
+        })
+    }
+
+    pub fn try_clean_into<'output>(
+        &self,
+        text: &str,
+        out: &'output mut String,
+    ) -> Result<CleaningResult<'output>, CleaningError> {
         out.clear();
 
         if text.is_empty() {
-            return CleaningResult {
+            return Ok(CleaningResult {
                 text: Cow::Borrowed(out.as_str()),
                 changes_made: 0,
                 stats: CleaningStats::default(),
-            };
+            });
         }
 
         if self.can_use_ascii_fast_path(text) {
             out.push_str(text);
-            return CleaningResult {
+            return Ok(CleaningResult {
                 text: Cow::Borrowed(out.as_str()),
                 changes_made: 0,
                 stats: CleaningStats::default(),
-            };
+            });
         }
 
-        let (changes, stats) = self.clean_into_internal(text, out);
-        CleaningResult {
+        let working = self.normalize_input(text)?;
+        let (changes, stats) = self.clean_into_internal(working, out);
+        Ok(CleaningResult {
             text: Cow::Borrowed(out.as_str()),
             changes_made: changes,
             stats,
-        }
+        })
     }
 
-    fn clean_into_internal(&self, text: &str, out: &mut String) -> (u64, CleaningStats) {
+    fn clean_into_internal(
+        &self,
+        working_input: Cow<'_, str>,
+        out: &mut String,
+    ) -> (u64, CleaningStats) {
         let mut stats = CleaningStats::default();
         let mut changes = 0u64;
 
-        let mut working = self.apply_unicode_normalization(text);
+        let mut working = working_input;
 
         if self.options.normalize_line_endings.is_some() {
             let (lf, changed) = to_lf(working.as_ref());
@@ -441,7 +487,6 @@ impl TextCleaner {
         let trim = self.options.remove_trailing_whitespace;
         let collapse = self.options.collapse_whitespace;
 
-        let needs_emoji = self.options.keyboard_only || self.options.remove_hidden;
         let mut emoji_classifier: Option<EmojiClassifier> = None;
         let default_ignorables = icu_sets::default_ignorable_code_point();
         let mut cluster_buffer = String::new();
@@ -470,24 +515,24 @@ impl TextCleaner {
                 continue;
             }
 
-            let is_emoji_cluster = if needs_emoji && !grapheme.is_ascii() {
-                let classifier = emoji_classifier.get_or_insert_with(EmojiClassifier::new);
-                classify_emoji_cluster(grapheme, classifier).is_rendered
-            } else {
-                false
+            let mut emoji_cluster_cache: Option<bool> = None;
+            let mut ensure_emoji_cluster = |classifier: &mut Option<EmojiClassifier>| -> bool {
+                if let Some(value) = emoji_cluster_cache {
+                    return value;
+                }
+                if grapheme.is_ascii() {
+                    emoji_cluster_cache = Some(false);
+                    return false;
+                }
+                if !self.options.keyboard_only && !self.options.remove_hidden {
+                    emoji_cluster_cache = Some(false);
+                    return false;
+                }
+                let classifier = classifier.get_or_insert_with(EmojiClassifier::new);
+                let value = classify_emoji_cluster(grapheme, classifier).is_rendered;
+                emoji_cluster_cache = Some(value);
+                value
             };
-
-            if self.options.keyboard_only
-                && matches!(self.options.emoji_policy, EmojiPolicy::Drop)
-                && is_emoji_cluster
-            {
-                record_change!(changes, stats, emojis_dropped);
-                continue;
-            }
-
-            let keep_hidden = is_emoji_cluster
-                && (!self.options.keyboard_only
-                    || matches!(self.options.emoji_policy, EmojiPolicy::Keep));
 
             cluster_buffer.clear();
             cluster_buffer.reserve(grapheme.len());
@@ -503,6 +548,9 @@ impl TextCleaner {
                 }
 
                 if self.options.remove_hidden && default_ignorables.contains(c) {
+                    let keep_hidden = (!self.options.keyboard_only
+                        || matches!(self.options.emoji_policy, EmojiPolicy::Keep))
+                        && ensure_emoji_cluster(&mut emoji_classifier);
                     // TODO: expose a preserve-joiners toggle so ZWJ/ZWNJ handling can be configured.
                     if keep_hidden {
                         cluster_buffer.push(c);
@@ -582,6 +630,7 @@ impl TextCleaner {
             }
 
             if self.options.keyboard_only {
+                let is_emoji_cluster = ensure_emoji_cluster(&mut emoji_classifier);
                 // TODO: offer an optional transliteration path when dropping non-ASCII characters.
                 if cluster_buffer.chars().all(is_keyboard_ascii)
                     || (is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep))
@@ -618,22 +667,19 @@ impl TextCleaner {
         (changes, stats)
     }
 
-    fn apply_unicode_normalization<'a>(&self, text: &'a str) -> Cow<'a, str> {
+    fn normalize_input<'a>(&self, text: &'a str) -> Result<Cow<'a, str>, CleaningError> {
         match self.options.unicode_normalization {
-            UnicodeNormalizationMode::None => Cow::Borrowed(text),
+            UnicodeNormalizationMode::None => Ok(Cow::Borrowed(text)),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFD => Cow::Owned(text.nfd().collect()),
+            UnicodeNormalizationMode::NFD => Ok(Cow::Owned(text.nfd().collect())),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFC => Cow::Owned(text.nfc().collect()),
+            UnicodeNormalizationMode::NFC => Ok(Cow::Owned(text.nfc().collect())),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFKD => Cow::Owned(text.nfkd().collect()),
+            UnicodeNormalizationMode::NFKD => Ok(Cow::Owned(text.nfkd().collect())),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFKC => Cow::Owned(text.nfkc().collect()),
+            UnicodeNormalizationMode::NFKC => Ok(Cow::Owned(text.nfkc().collect())),
             #[cfg(not(feature = "unorm"))]
-            mode => panic!(
-                "Unicode normalization mode {:?} requested but the 'unorm' feature is disabled",
-                mode
-            ),
+            mode => Err(CleaningError::NormalizationUnavailable { requested: mode }),
         }
     }
 
@@ -720,7 +766,9 @@ impl StreamCleaner {
         chunk: String,
         out: &'out mut String,
     ) -> CleaningResult<'out> {
-        let result = self.cleaner.clean(&chunk);
+        let result = self.cleaner.try_clean(&chunk).unwrap_or_else(|err| {
+            panic!("StreamCleaner::feed failed: {err}. Enable the 'unorm' feature or use try_clean")
+        });
         let CleaningResult {
             text,
             changes_made,

@@ -31,7 +31,7 @@ let fancy = humanize("“Quote”—and…more");         // -> "\"Quote\"-and..
 
 Use `TextCleaner` when you need precise control.
 
-```rust
+```rust,no_run
 use rehuman::{
     CleaningOptions, EmojiPolicy, TextCleaner, UnicodeNormalizationMode,
 };
@@ -54,7 +54,9 @@ let options = CleaningOptions::builder()
 
 let cleaner = TextCleaner::new(options);
 
-let result = cleaner.clean("“Hello—world…”\u{00A0}😀");
+let result = cleaner
+    .try_clean("“Hello—world…”\u{00A0}😀")
+    .expect("normalization requires the 'unorm' feature");
 assert_eq!(result.text, "\"Hello-world...\"");
 println!("dashes normalized: {}", result.stats.dashes_normalized);
 ```
@@ -87,11 +89,11 @@ let options = CleaningOptions::builder()
     .emoji_policy(EmojiPolicy::Keep)
     .remove_hidden(false)
     .normalize_line_endings(None)
-    .strip_bidi_controls(true) // requires the `security` feature
     .build();
 ```
 
 The presets (`minimal`, `balanced`, `humanize`, `aggressive`) now spell out every field explicitly, so they serve as documented baselines that you can tweak via the builder.
+When the optional `security` feature is enabled, you can opt into bidi-control stripping via `.strip_bidi_controls(true)` on the builder.
 
 ### Cleaning Statistics
 
@@ -167,5 +169,5 @@ println!("changes: {}", summary.changes_made);
 ## Error Handling
 
 - The library operates on `&str` and returns a `CleaningResult` whose text is a `Cow<'_, str>` (borrowed when no changes are needed, owned otherwise).
-- `TextCleaner::clean` never fails; it always produces a `CleaningResult`.
+- Prefer `TextCleaner::try_clean` / `try_clean_into` to handle `CleaningError` (for example when Unicode normalization is requested without enabling the `unorm` feature). The infallible variants `clean`/`clean_into` will panic in that scenario.
 - CLI helpers surface errors through `anyhow::Result` for ergonomic error messages.
