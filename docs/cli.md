@@ -82,6 +82,9 @@ normalize_quotes = true
 unicode_normalization = "nfkc"
 ```
 
+> [!TIP]
+> A ready-to-copy template lives in `config.example.toml` at the project root.
+
 ### File Size Limit
 
 `rehuman` reads entire inputs into memory by default and rejects files over **5 MiB**. Use `--stream` for larger files.

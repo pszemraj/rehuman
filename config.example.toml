@@ -1,0 +1,20 @@
+# Example configuration for rehuman CLI.
+# Copy this file to:
+#   Linux:   ~/.config/rehuman/config.toml
+#   macOS:   ~/Library/Application Support/rehuman/config.toml
+#   Windows: %APPDATA%\rehuman\config.toml
+
+keyboard_only = true
+emoji_policy = "drop"            # "drop" or "keep"
+remove_hidden = true
+remove_trailing_whitespace = true
+remove_control_chars = true
+
+normalize_spaces = true
+normalize_dashes = true
+normalize_quotes = true
+normalize_other = true
+
+collapse_whitespace = false
+line_endings = "auto"            # "auto", "lf", "crlf", "cr"
+unicode_normalization = "none"   # "none", "nfd", "nfc", "nfkd", "nfkc"
