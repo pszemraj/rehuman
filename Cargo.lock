@@ -620,7 +620,6 @@ dependencies = [
  "ucd-parse",
  "unicode-normalization",
  "unicode-segmentation",
- "unicode_names2",
 ]
 
 [[package]]
@@ -878,12 +877,6 @@ name = "unicode-segmentation"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493"
-
-[[package]]
-name = "unicode_names2"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "029df4cc8238cefc911704ff8fa210853a0f3bce2694d8f51181dd41ee0f3301"
 
 [[package]]
 name = "utf8parse"

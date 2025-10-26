@@ -35,7 +35,6 @@ tempfile = "3.10"
 [build-dependencies]
 phf_codegen = "0.11"
 ucd-parse = "0.1"
-unicode_names2 = "0.5"
 icu_properties = { version = "1.5", features = ["compiled_data"] }
 
 [dev-dependencies]
