@@ -83,7 +83,7 @@ println!("dashes normalized: {}", result.stats.dashes_normalized);
 ```rust
 pub struct CleaningResult {
     pub text: String,
-    pub changes_made: usize,
+    pub changes_made: u64,
     pub stats: CleaningStats,
 }
 ```
@@ -92,16 +92,16 @@ pub struct CleaningResult {
 
 ```rust
 pub struct CleaningStats {
-    pub hidden_chars_removed: usize,
-    pub trailing_whitespace_removed: usize,
-    pub spaces_normalized: usize,
-    pub dashes_normalized: usize,
-    pub quotes_normalized: usize,
-    pub other_normalized: usize,
-    pub control_chars_removed: usize,
-    pub line_endings_normalized: usize,
-    pub non_keyboard_removed: usize,
-    pub emojis_dropped: usize,
+    pub hidden_chars_removed: u64,
+    pub trailing_whitespace_removed: u64,
+    pub spaces_normalized: u64,
+    pub dashes_normalized: u64,
+    pub quotes_normalized: u64,
+    pub other_normalized: u64,
+    pub control_chars_removed: u64,
+    pub line_endings_normalized: u64,
+    pub non_keyboard_removed: u64,
+    pub emojis_dropped: u64,
 }
 ```
 
@@ -109,9 +109,10 @@ Use these metrics for monitoring, debugging, or reporting.
 
 ## Feature Flags
 
-| Flag    | Default | Description                                                                                                                |
-| ------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `unorm` | enabled | Enables Unicode normalization support via the `unicode-normalization` crate. Disable if you want to avoid that dependency. |
+| Flag     | Default | Description                                                                                                                |
+| -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `unorm`  | enabled | Enables Unicode normalization support via the `unicode-normalization` crate. Disable if you want to avoid that dependency. |
+| `stats`  | enabled | Collects per-change counters in the hot path. Disable to skip tracking overhead while keeping change detection accurate.   |
 
 ## Error Handling
 

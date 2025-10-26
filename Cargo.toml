@@ -14,8 +14,9 @@ categories = ["text-processing", "parser-implementations"]
 default-run = "rehuman"
 
 [features]
-default = ["unorm"]
+default = ["unorm", "stats"]
 # Enable full Unicode normalization (NFC/NFD/NFKC/NFKD)
+stats = []
 unorm = ["dep:unicode-normalization"]
 
 [dependencies]

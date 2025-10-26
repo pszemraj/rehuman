@@ -353,13 +353,13 @@ pub fn parse_bool_flag(value: &str) -> std::result::Result<bool, String> {
 #[derive(Debug)]
 pub struct StreamOutcome {
     pub stats: CleaningStats,
-    pub changes_made: usize,
+    pub changes_made: u64,
 }
 
 #[derive(Serialize)]
 pub struct StatsSummary<'a> {
     pub changed: bool,
-    pub changes_made: usize,
+    pub changes_made: u64,
     pub stats: &'a CleaningStats,
 }
 
@@ -374,7 +374,7 @@ where
     W: Write,
 {
     let mut aggregate = CleaningStats::default();
-    let mut changes_made = 0usize;
+    let mut changes_made = 0u64;
     let mut buffer = String::new();
 
     loop {
@@ -390,7 +390,7 @@ where
             .write_all(result.text.as_bytes())
             .context("failed to write stream chunk")?;
         aggregate.accumulate(&result.stats);
-        changes_made += result.changes_made;
+        changes_made = changes_made.saturating_add(result.changes_made);
     }
 
     writer.flush().context("failed to flush output stream")?;

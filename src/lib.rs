@@ -44,40 +44,83 @@ pub enum EmojiPolicy {
 /// Detailed statistics about cleaning operations.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct CleaningStats {
-    pub hidden_chars_removed: usize,
-    pub trailing_whitespace_removed: usize,
-    pub spaces_normalized: usize,
-    pub dashes_normalized: usize,
-    pub quotes_normalized: usize,
-    pub other_normalized: usize,
-    pub control_chars_removed: usize,
-    pub line_endings_normalized: usize,
-    pub non_keyboard_removed: usize,
-    pub emojis_dropped: usize,
+    pub hidden_chars_removed: u64,
+    pub trailing_whitespace_removed: u64,
+    pub spaces_normalized: u64,
+    pub dashes_normalized: u64,
+    pub quotes_normalized: u64,
+    pub other_normalized: u64,
+    pub control_chars_removed: u64,
+    pub line_endings_normalized: u64,
+    pub non_keyboard_removed: u64,
+    pub emojis_dropped: u64,
 }
 
 /// Result of a text cleaning operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CleaningResult {
     pub text: String,
-    pub changes_made: usize,
+    pub changes_made: u64,
     pub stats: CleaningStats,
 }
 
 impl CleaningStats {
     /// Merge another stats snapshot into this one.
     pub fn accumulate(&mut self, other: &CleaningStats) {
-        self.hidden_chars_removed += other.hidden_chars_removed;
-        self.trailing_whitespace_removed += other.trailing_whitespace_removed;
-        self.spaces_normalized += other.spaces_normalized;
-        self.dashes_normalized += other.dashes_normalized;
-        self.quotes_normalized += other.quotes_normalized;
-        self.other_normalized += other.other_normalized;
-        self.control_chars_removed += other.control_chars_removed;
-        self.line_endings_normalized += other.line_endings_normalized;
-        self.non_keyboard_removed += other.non_keyboard_removed;
-        self.emojis_dropped += other.emojis_dropped;
+        self.hidden_chars_removed = self
+            .hidden_chars_removed
+            .saturating_add(other.hidden_chars_removed);
+        self.trailing_whitespace_removed = self
+            .trailing_whitespace_removed
+            .saturating_add(other.trailing_whitespace_removed);
+        self.spaces_normalized = self
+            .spaces_normalized
+            .saturating_add(other.spaces_normalized);
+        self.dashes_normalized = self
+            .dashes_normalized
+            .saturating_add(other.dashes_normalized);
+        self.quotes_normalized = self
+            .quotes_normalized
+            .saturating_add(other.quotes_normalized);
+        self.other_normalized = self.other_normalized.saturating_add(other.other_normalized);
+        self.control_chars_removed = self
+            .control_chars_removed
+            .saturating_add(other.control_chars_removed);
+        self.line_endings_normalized = self
+            .line_endings_normalized
+            .saturating_add(other.line_endings_normalized);
+        self.non_keyboard_removed = self
+            .non_keyboard_removed
+            .saturating_add(other.non_keyboard_removed);
+        self.emojis_dropped = self.emojis_dropped.saturating_add(other.emojis_dropped);
     }
+}
+
+#[cfg(feature = "stats")]
+macro_rules! record_stat {
+    ($stats:expr, $field:ident, $amount:expr) => {{
+        $stats.$field = $stats.$field.saturating_add($amount);
+    }};
+}
+
+#[cfg(not(feature = "stats"))]
+macro_rules! record_stat {
+    ($stats:expr, $field:ident, $amount:expr) => {{
+        let _ = &$stats;
+        let _ = stringify!($field);
+        let _ = &$amount;
+    }};
+}
+
+macro_rules! record_change {
+    ($changes:expr, $stats:expr, $field:ident) => {{
+        record_change!($changes, $stats, $field, 1u64);
+    }};
+    ($changes:expr, $stats:expr, $field:ident, $amount:expr) => {{
+        let amount = ($amount) as u64;
+        $changes = $changes.saturating_add(amount);
+        record_stat!($stats, $field, amount);
+    }};
 }
 
 /// Configuration for cleaning.
@@ -184,6 +227,7 @@ impl TextCleaner {
 
     pub fn clean(&self, text: &str) -> CleaningResult {
         let mut stats = CleaningStats::default();
+        let mut changes = 0u64;
 
         if text.is_empty() {
             return CleaningResult {
@@ -206,7 +250,9 @@ impl TextCleaner {
         if self.options.normalize_line_endings.is_some() {
             let (lf, changed) = to_lf(&working);
             working = lf;
-            stats.line_endings_normalized += changed;
+            if changed > 0 {
+                record_change!(changes, stats, line_endings_normalized, changed);
+            }
         }
 
         let mut out = String::with_capacity(working.len());
@@ -214,42 +260,41 @@ impl TextCleaner {
         let trim = self.options.remove_trailing_whitespace;
         let collapse = self.options.collapse_whitespace;
 
+        let emoji_classifier = if self.options.keyboard_only || self.options.remove_hidden {
+            Some(EmojiClassifier::new())
+        } else {
+            None
+        };
         let default_ignorables = icu_sets::default_ignorable_code_point();
-        let emoji_set = icu_sets::emoji();
-        let emoji_presentation = icu_sets::emoji_presentation();
-        let extended_pictographic = icu_sets::extended_pictographic();
 
         for grapheme in UnicodeSegmentation::graphemes(working.as_str(), true) {
-            let mut chars: Vec<char> = grapheme.chars().collect();
-            if chars.is_empty() {
-                continue;
-            }
-
-            let emoji_context = classify_emoji_cluster(
-                &chars,
-                emoji_set,
-                emoji_presentation,
-                extended_pictographic,
-            );
-            let is_emoji_cluster = emoji_context.is_rendered;
-
-            if self.options.keyboard_only
-                && matches!(self.options.emoji_policy, EmojiPolicy::Drop)
-                && is_emoji_cluster
-            {
-                stats.emojis_dropped += 1;
+            if grapheme.is_empty() {
                 continue;
             }
 
             if is_newline_grapheme(grapheme) {
                 if trim {
-                    stats.trailing_whitespace_removed += pending_ws;
-                    pending_ws = 0;
+                    if pending_ws > 0 {
+                        record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
+                        pending_ws = 0;
+                    }
                 } else {
                     flush_pending_whitespace(&mut out, pending_ws, collapse);
                     pending_ws = 0;
                 }
                 out.push_str(grapheme);
+                continue;
+            }
+
+            let is_emoji_cluster = emoji_classifier.as_ref().map_or(false, |classifier| {
+                classify_emoji_cluster(grapheme, classifier).is_rendered
+            });
+
+            if self.options.keyboard_only
+                && matches!(self.options.emoji_policy, EmojiPolicy::Drop)
+                && is_emoji_cluster
+            {
+                record_change!(changes, stats, emojis_dropped);
                 continue;
             }
 
@@ -260,29 +305,25 @@ impl TextCleaner {
             let mut cluster_buffer = String::new();
             let mut emitted_directly = false;
 
-            for mut c in chars.drain(..) {
-                if default_ignorables.contains(c) {
+            for mut c in grapheme.chars() {
+                if self.options.remove_hidden && default_ignorables.contains(c) {
                     // TODO: expose a preserve-joiners toggle so ZWJ/ZWNJ handling can be configured.
-                    if self.options.remove_hidden {
-                        if keep_hidden {
-                            cluster_buffer.push(c);
-                        } else {
-                            stats.hidden_chars_removed += 1;
-                        }
-                    } else {
+                    if keep_hidden {
                         cluster_buffer.push(c);
+                    } else {
+                        record_change!(changes, stats, hidden_chars_removed);
                     }
                     continue;
                 }
 
                 if self.options.remove_control_chars && is_disallowed_control(c) {
-                    stats.control_chars_removed += 1;
+                    record_change!(changes, stats, control_chars_removed);
                     continue;
                 }
 
                 if self.options.normalize_spaces {
                     if let Some(&mapped) = SPACE_MAP.get(&c) {
-                        stats.spaces_normalized += 1;
+                        record_change!(changes, stats, spaces_normalized);
                         c = mapped;
                     }
                 }
@@ -290,7 +331,7 @@ impl TextCleaner {
                 if self.options.normalize_dashes {
                     if let Some(mapped) = map_dash(c) {
                         if mapped != c {
-                            stats.dashes_normalized += 1;
+                            record_change!(changes, stats, dashes_normalized);
                         }
                         c = mapped;
                     }
@@ -299,7 +340,7 @@ impl TextCleaner {
                 if self.options.normalize_quotes {
                     if let Some(mapped) = map_quote(c) {
                         if mapped != c {
-                            stats.quotes_normalized += 1;
+                            record_change!(changes, stats, quotes_normalized);
                         }
                         c = mapped;
                     }
@@ -309,13 +350,13 @@ impl TextCleaner {
                     match c {
                         FRACTION_SLASH => {
                             c = '/';
-                            stats.other_normalized += 1;
+                            record_change!(changes, stats, other_normalized);
                         }
                         HORIZONTAL_ELLIPSIS | MIDLINE_HORIZONTAL_ELLIPSIS => {
                             flush_pending_whitespace(&mut out, pending_ws, collapse);
                             pending_ws = 0;
                             out.push_str("...");
-                            stats.other_normalized += 1;
+                            record_change!(changes, stats, other_normalized);
                             emitted_directly = true;
                             break;
                         }
@@ -351,9 +392,12 @@ impl TextCleaner {
                 {
                     out.push_str(&cluster_buffer);
                 } else if is_emoji_cluster {
-                    stats.emojis_dropped += 1;
+                    record_change!(changes, stats, emojis_dropped);
                 } else {
-                    stats.non_keyboard_removed += cluster_buffer.chars().count();
+                    let removed = cluster_buffer.chars().count();
+                    if removed > 0 {
+                        record_change!(changes, stats, non_keyboard_removed, removed);
+                    }
                 }
             } else {
                 out.push_str(&cluster_buffer);
@@ -361,7 +405,9 @@ impl TextCleaner {
         }
 
         if trim {
-            stats.trailing_whitespace_removed += pending_ws;
+            if pending_ws > 0 {
+                record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
+            }
         } else {
             flush_pending_whitespace(&mut out, pending_ws, collapse);
         }
@@ -375,10 +421,9 @@ impl TextCleaner {
             };
         }
 
-        let changes_made = aggregate_changes(&stats);
         CleaningResult {
             text,
-            changes_made,
+            changes_made: changes,
             stats,
         }
     }
@@ -400,44 +445,15 @@ impl TextCleaner {
     }
 
     fn can_use_ascii_fast_path(&self, text: &str) -> bool {
-        if !text.is_ascii() {
-            return false;
-        }
-        if self.options.keyboard_only
-            || self.options.collapse_whitespace
-            || self.options.normalize_line_endings.is_some()
-        {
-            return false;
-        }
-        if !matches!(
-            self.options.unicode_normalization,
-            UnicodeNormalizationMode::None
-        ) {
-            return false;
-        }
-
-        let mut trailing_ws = 0usize;
-        for c in text.chars() {
-            if self.options.remove_control_chars && is_disallowed_control(c) {
-                return false;
-            }
-            match c {
-                ' ' | '\t' => trailing_ws += 1,
-                '\n' | '\r' => {
-                    if self.options.remove_trailing_whitespace && trailing_ws > 0 {
-                        return false;
-                    }
-                    trailing_ws = 0;
-                }
-                _ => trailing_ws = 0,
-            }
-        }
-
-        if self.options.remove_trailing_whitespace && trailing_ws > 0 {
-            return false;
-        }
-
-        true
+        text.is_ascii()
+            && !self.options.remove_trailing_whitespace
+            && !self.options.collapse_whitespace
+            && self.options.normalize_line_endings.is_none()
+            && !self.options.remove_control_chars
+            && matches!(
+                self.options.unicode_normalization,
+                UnicodeNormalizationMode::None
+            )
     }
 }
 
@@ -446,12 +462,23 @@ struct EmojiClusterContext {
     is_rendered: bool,
 }
 
-fn classify_emoji_cluster(
-    chars: &[char],
+struct EmojiClassifier {
     emoji: icu_properties::sets::CodePointSetDataBorrowed<'static>,
     emoji_presentation: icu_properties::sets::CodePointSetDataBorrowed<'static>,
     extended_pictographic: icu_properties::sets::CodePointSetDataBorrowed<'static>,
-) -> EmojiClusterContext {
+}
+
+impl EmojiClassifier {
+    fn new() -> Self {
+        Self {
+            emoji: icu_sets::emoji(),
+            emoji_presentation: icu_sets::emoji_presentation(),
+            extended_pictographic: icu_sets::extended_pictographic(),
+        }
+    }
+}
+
+fn classify_emoji_cluster(grapheme: &str, classifier: &EmojiClassifier) -> EmojiClusterContext {
     let mut has_emoji_presentation = false;
     let mut has_extended_pictographic = false;
     let mut has_emoji = false;
@@ -459,14 +486,14 @@ fn classify_emoji_cluster(
     let mut has_zwj = false;
     let mut has_keycap = false;
 
-    for &c in chars {
-        if emoji_presentation.contains(c) {
+    for c in grapheme.chars() {
+        if classifier.emoji_presentation.contains(c) {
             has_emoji_presentation = true;
         }
-        if extended_pictographic.contains(c) {
+        if classifier.extended_pictographic.contains(c) {
             has_extended_pictographic = true;
         }
-        if emoji.contains(c) {
+        if classifier.emoji.contains(c) {
             has_emoji = true;
         }
         match c {
@@ -506,25 +533,12 @@ fn is_newline_grapheme(g: &str) -> bool {
     matches!(g, "\n" | "\r" | "\r\n")
 }
 
-fn aggregate_changes(stats: &CleaningStats) -> usize {
-    stats.hidden_chars_removed
-        + stats.trailing_whitespace_removed
-        + stats.spaces_normalized
-        + stats.dashes_normalized
-        + stats.quotes_normalized
-        + stats.other_normalized
-        + stats.control_chars_removed
-        + stats.line_endings_normalized
-        + stats.non_keyboard_removed
-        + stats.emojis_dropped
-}
-
 // ----------------- helpers -----------------
 
-fn to_lf(s: &str) -> (String, usize) {
+fn to_lf(s: &str) -> (String, u64) {
     // Convert CRLF, CR and NEL (U+0085) to LF and count conversions.
     let mut out = String::with_capacity(s.len());
-    let mut changed = 0usize;
+    let mut changed = 0u64;
     let mut it = s.chars().peekable();
     while let Some(c) = it.next() {
         if c == '\r' {
@@ -532,10 +546,10 @@ fn to_lf(s: &str) -> (String, usize) {
                 it.next(); // consume LF
             }
             out.push('\n');
-            changed += 1;
+            changed = changed.saturating_add(1);
         } else if c == '\u{0085}' {
             out.push('\n');
-            changed += 1;
+            changed = changed.saturating_add(1);
         } else {
             out.push(c);
         }
