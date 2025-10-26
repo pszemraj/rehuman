@@ -752,6 +752,7 @@ pub struct StreamCleaner {
     buffer: String,
     total_stats: CleaningStats,
     total_changes: u64,
+    has_emitted_output: bool,
 }
 
 impl StreamCleaner {
@@ -761,6 +762,7 @@ impl StreamCleaner {
             buffer: String::new(),
             total_stats: CleaningStats::default(),
             total_changes: 0,
+            has_emitted_output: false,
         }
     }
 
@@ -770,6 +772,7 @@ impl StreamCleaner {
             buffer: String::new(),
             total_stats: CleaningStats::default(),
             total_changes: 0,
+            has_emitted_output: false,
         }
     }
 
@@ -811,6 +814,13 @@ impl StreamCleaner {
         chunk: String,
         out: &'out mut String,
     ) -> CleaningResult<'out> {
+        const CONTEXT_SENTINEL: char = 'a';
+        let mut chunk = chunk;
+        let use_sentinel = self.has_emitted_output;
+        if use_sentinel {
+            chunk.insert(0, CONTEXT_SENTINEL);
+        }
+
         let result = self.cleaner.try_clean(&chunk).unwrap_or_else(|err| {
             panic!("StreamCleaner::feed failed: {err}. Enable the 'unorm' feature or use try_clean")
         });
@@ -821,11 +831,22 @@ impl StreamCleaner {
         } = result;
 
         out.clear();
-        out.push_str(text.as_ref());
+        let cleaned_text = text.as_ref();
+        if use_sentinel {
+            let stripped = cleaned_text
+                .strip_prefix(CONTEXT_SENTINEL)
+                .unwrap_or(cleaned_text);
+            out.push_str(stripped);
+        } else {
+            out.push_str(cleaned_text);
+        }
         let emitted = &out[..];
 
         self.total_stats.accumulate(&stats);
         self.total_changes = self.total_changes.saturating_add(changes_made);
+        if !emitted.is_empty() {
+            self.has_emitted_output = true;
+        }
 
         CleaningResult {
             text: Cow::Borrowed(emitted),
