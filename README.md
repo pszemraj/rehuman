@@ -19,36 +19,20 @@ Untrusted text often contains:
 
 ## Installation
 
-Add this to your projects `Cargo.toml`:
+**Library crate**: add `rehuman` to your project with `cargo add rehuman` or edit `Cargo.toml`:
 
 ```toml
 [dependencies]
 rehuman = "0.1.0" # replace with the latest published version
 ```
 
-## Quick Start
+**CLI binaries**: install the published release (installs both `rehuman` and `ishuman`):
 
-```rust
-use rehuman::{clean, humanize};
-
-// Basic preset: remove hidden chars, normalize spaces
-let cleaned = clean("Hi\u{200B}there"); // -> "Hi there"
-
-// Humanize preset: adds typographic fixes
-let humanized = humanize("“Quote”—and…more"); // -> "\"Quote\"-and...more"
+```bash
+cargo install rehuman
 ```
 
-By default `clean` also strips emoji to guarantee ASCII-only output. Disable this with `CleanConfig::allow_emoji(true)` if you need to preserve them:
-
-```rust
-use rehuman::clean;
-
-let cleaned = clean("Thanks 👍"); // -> "Thanks "
-```
-
-## Local installation
-
-The CLI binaries (`rehuman` (_transform_) and `ishuman` (_detect_)) ship with the repo. Clone and install locally with:
+For the latest version(s), clone this repo and run `cargo install --path .`:
 
 ```bash
 git clone https://github.com/pszemraj/rehuman.git
@@ -56,9 +40,46 @@ cd rehuman
 cargo install --path .
 ```
 
-This places both commands on your `PATH`[^1]; run `rehuman --help` or `ishuman --help` to explore streaming, in-place, and detection options.
+Binaries will be installed to `~/.cargo/bin` by default.[^1]
 
-[^1]: You may need to add `~/.cargo/bin` to your `PATH` if not already there: put `export PATH="$HOME/.cargo/bin:$PATH"` in your .bashrc/.zshrc.
+[^1]: You may need to add `~/.cargo/bin` to your `PATH` if it is not already there; add `export PATH="$HOME/.cargo/bin:$PATH"` to your shell profile (`.bashrc`, `.zshrc`, etc.).
+
+## Quick Start
+
+### Library
+
+```rust
+use rehuman::{clean, humanize};
+
+let cleaned = clean("Hello\u{200B}there"); // -> "Hello there"
+let humanized = humanize("“Quote”—and…more"); // -> "\"Quote\"-and...more"
+```
+
+> [!IMPORTANT]
+> By default `rehuman::clean` removes emoji to guarantee ASCII-only output[^2].
+
+[^2]: This is a deliberate design choice given the propensity of today's LLMs to spam emoji in their outputs.
+
+```rust
+use rehuman::clean;
+
+// Default behavior removes emoji
+let cleaned = clean("Thanks 👍"); // -> "Thanks "
+```
+
+Use `CleanConfig::allow_emoji(true)` if you need to preserve them.
+
+### CLI
+
+```bash
+# Normalize text with streaming stats
+rehuman notes.txt --stream --stats
+
+# Detect unsafe Unicode without modifying the file
+ishuman notes.txt --exit-code
+```
+
+Run `rehuman --help` or `ishuman --help` for the full list of overrides (emoji policy, line endings, configs, streaming, etc.).
 
 ## Documentation
 
