@@ -1,5 +1,6 @@
 mod common;
 
+use std::io;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -7,8 +8,8 @@ use clap::{ArgAction, Parser};
 
 use common::{
     default_cli_options, default_config_path, load_config, parse_bool_flag, read_input,
-    write_stats, EmojiPolicyArg, LineEndingChoice, PartialOptions, UnicodeNormalizationChoice,
-    MAX_INPUT_BYTES,
+    write_stats, write_stats_json, EmojiPolicyArg, LineEndingChoice, PartialOptions, StatsSummary,
+    UnicodeNormalizationChoice, MAX_INPUT_BYTES,
 };
 use rehuman::TextCleaner;
 
@@ -40,7 +41,17 @@ fn main() -> Result<()> {
         write_stats(&result);
     }
 
-    println!("{}", if is_clean { 1 } else { 0 });
+    if cli.stats_json {
+        let summary = StatsSummary {
+            changed: !is_clean,
+            changes_made: result.changes_made,
+            stats: &result.stats,
+        };
+        let mut stdout = io::stdout().lock();
+        write_stats_json(&mut stdout, &summary)?;
+    } else {
+        println!("{}", if is_clean { 1 } else { 0 });
+    }
 
     if cli.exit_code {
         std::process::exit(if is_clean { 0 } else { 1 });
@@ -120,6 +131,10 @@ struct Cli {
     /// Print a summary of potential transformations to stderr.
     #[arg(long, short = 's', action = ArgAction::SetTrue)]
     stats: bool,
+
+    /// Emit a JSON summary of potential transformations to stdout.
+    #[arg(long = "json", action = ArgAction::SetTrue)]
+    stats_json: bool,
 
     /// Set the process exit code to 0 (clean) or 1 (needs cleanup).
     #[arg(long, action = ArgAction::SetTrue)]

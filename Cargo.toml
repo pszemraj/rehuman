@@ -3,10 +3,12 @@ name = "rehuman"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.70"
-authors = ["Your Name <you@example.com>"]
+authors = ["Peter Szemraj <peterszemraj+dev@gmail.com>"]
 license = "MIT"
 description = "Unicode-safe text cleaning & typographic normalization for Rust"
-repository = "https://example.com/rehuman"
+repository = "https://github.com/pszemraj/rehuman"
+readme = "README.md"
+documentation = "https://docs.rs/rehuman"
 keywords = ["unicode", "normalize", "cleanup", "whitespace", "quotes", "dashes", "ellipsis"]
 categories = ["text-processing", "parser-implementations"]
 default-run = "rehuman"
@@ -26,6 +28,8 @@ unicode-normalization = { version = "0.1", optional = true }
 phf = { version = "0.11", features = ["macros"] }
 unicode-segmentation = "1.12"
 icu_properties = { version = "1.5", features = ["compiled_data"] }
+serde_json = "1.0"
+tempfile = "3.10"
 
 [build-dependencies]
 phf_codegen = "0.11"

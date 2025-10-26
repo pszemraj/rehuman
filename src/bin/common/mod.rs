@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -8,7 +8,8 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use rehuman::{
-    CleaningOptions, CleaningResult, EmojiPolicy, LineEndingStyle, UnicodeNormalizationMode,
+    CleaningOptions, CleaningResult, CleaningStats, EmojiPolicy, LineEndingStyle, TextCleaner,
+    UnicodeNormalizationMode,
 };
 
 pub const MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
@@ -346,4 +347,63 @@ pub fn parse_bool_flag(value: &str) -> std::result::Result<bool, String> {
         "false" | "f" | "0" | "no" | "n" | "off" => Ok(false),
         other => Err(format!("invalid boolean value '{other}'")),
     }
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct StreamOutcome {
+    pub stats: CleaningStats,
+    pub changes_made: usize,
+}
+
+#[derive(Serialize)]
+pub struct StatsSummary<'a> {
+    pub changed: bool,
+    pub changes_made: usize,
+    pub stats: &'a CleaningStats,
+}
+
+#[allow(dead_code)]
+pub fn clean_stream<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    cleaner: &TextCleaner,
+) -> Result<StreamOutcome>
+where
+    R: BufRead,
+    W: Write,
+{
+    let mut aggregate = CleaningStats::default();
+    let mut changes_made = 0usize;
+    let mut buffer = String::new();
+
+    loop {
+        buffer.clear();
+        let bytes_read = reader
+            .read_line(&mut buffer)
+            .context("failed to read input stream")?;
+        if bytes_read == 0 {
+            break;
+        }
+        let result = cleaner.clean(&buffer);
+        writer
+            .write_all(result.text.as_bytes())
+            .context("failed to write stream chunk")?;
+        aggregate.accumulate(&result.stats);
+        changes_made += result.changes_made;
+    }
+
+    writer.flush().context("failed to flush output stream")?;
+
+    Ok(StreamOutcome {
+        stats: aggregate,
+        changes_made,
+    })
+}
+
+pub fn write_stats_json<W: Write>(writer: &mut W, summary: &StatsSummary) -> Result<()> {
+    serde_json::to_writer_pretty(&mut *writer, summary)
+        .context("failed to serialize JSON stats")?;
+    writer.write_all(b"\n").ok();
+    Ok(())
 }

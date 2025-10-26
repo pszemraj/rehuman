@@ -4,6 +4,7 @@
 use unicode_normalization::UnicodeNormalization;
 
 use icu_properties::sets as icu_sets;
+use serde::Serialize;
 use unicode_segmentation::UnicodeSegmentation;
 
 mod generated;
@@ -41,7 +42,7 @@ pub enum EmojiPolicy {
 }
 
 /// Detailed statistics about cleaning operations.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct CleaningStats {
     pub hidden_chars_removed: usize,
     pub trailing_whitespace_removed: usize,
@@ -56,11 +57,27 @@ pub struct CleaningStats {
 }
 
 /// Result of a text cleaning operation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CleaningResult {
     pub text: String,
     pub changes_made: usize,
     pub stats: CleaningStats,
+}
+
+impl CleaningStats {
+    /// Merge another stats snapshot into this one.
+    pub fn accumulate(&mut self, other: &CleaningStats) {
+        self.hidden_chars_removed += other.hidden_chars_removed;
+        self.trailing_whitespace_removed += other.trailing_whitespace_removed;
+        self.spaces_normalized += other.spaces_normalized;
+        self.dashes_normalized += other.dashes_normalized;
+        self.quotes_normalized += other.quotes_normalized;
+        self.other_normalized += other.other_normalized;
+        self.control_chars_removed += other.control_chars_removed;
+        self.line_endings_normalized += other.line_endings_normalized;
+        self.non_keyboard_removed += other.non_keyboard_removed;
+        self.emojis_dropped += other.emojis_dropped;
+    }
 }
 
 /// Configuration for cleaning.
@@ -245,6 +262,7 @@ impl TextCleaner {
 
             for mut c in chars.drain(..) {
                 if default_ignorables.contains(c) {
+                    // TODO: expose a preserve-joiners toggle so ZWJ/ZWNJ handling can be configured.
                     if self.options.remove_hidden {
                         if keep_hidden {
                             cluster_buffer.push(c);
@@ -327,6 +345,7 @@ impl TextCleaner {
             }
 
             if self.options.keyboard_only {
+                // TODO: offer an optional transliteration path when dropping non-ASCII characters.
                 if cluster_buffer.chars().all(is_keyboard_ascii)
                     || (is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep))
                 {

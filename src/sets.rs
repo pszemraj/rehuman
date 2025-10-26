@@ -7,6 +7,7 @@ pub fn is_hidden_char(c: char) -> bool {
 
 /// ASCII keyboard (US) characters + whitespace controls typically produced by keyboards.
 pub fn is_keyboard_ascii(c: char) -> bool {
+    // TODO: support an "extended keyboard" mode that permits a curated non-ASCII allowlist.
     matches!(c, '\n' | '\r' | '\t') || (c.is_ascii() && !c.is_ascii_control())
 }
 

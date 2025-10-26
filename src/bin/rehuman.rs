@@ -1,19 +1,20 @@
 mod common;
 
 use std::fs;
-use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::io::{self, BufReader, BufWriter, IsTerminal};
+use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use clap::{ArgAction, Parser};
+use tempfile::NamedTempFile;
 
 use common::{
-    default_cli_options, default_config_path, load_config, parse_bool_flag, read_input,
-    save_config, write_output, write_stats, ConfigFile, EmojiPolicyArg, LineEndingChoice,
-    PartialOptions, SerializableOptions, UnicodeNormalizationChoice, CONFIG_VERSION,
-    MAX_INPUT_BYTES,
+    clean_stream, default_cli_options, default_config_path, load_config, parse_bool_flag,
+    read_input, save_config, write_output, write_stats, write_stats_json, ConfigFile,
+    EmojiPolicyArg, LineEndingChoice, PartialOptions, SerializableOptions, StatsSummary,
+    UnicodeNormalizationChoice, CONFIG_VERSION, MAX_INPUT_BYTES,
 };
-use rehuman::TextCleaner;
+use rehuman::{CleaningResult, TextCleaner};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -74,15 +75,91 @@ fn main() -> Result<()> {
         bail!("no input provided; pass a file path or pipe data into stdin");
     }
 
-    let input = read_input(cli.input.as_deref(), MAX_INPUT_BYTES)?;
+    if cli.inplace && cli.input.is_none() {
+        bail!("'--inplace' requires an explicit file path input");
+    }
 
     let cleaner = TextCleaner::new(options.clone());
-    let result = cleaner.clean(&input);
 
-    write_output(&result)?;
+    let (aggregate_stats, changes_made) = if cli.inplace {
+        let input_path = cli
+            .input
+            .as_ref()
+            .expect("checked above that inplace requires an input path");
+        let file = fs::File::open(input_path)
+            .with_context(|| format!("failed to open {}", input_path.display()))?;
+        let metadata = file
+            .metadata()
+            .with_context(|| format!("failed to read metadata for {}", input_path.display()))?;
+        let parent = input_path.parent().unwrap_or_else(|| Path::new("."));
+
+        let mut reader = BufReader::new(file);
+        let mut temp = NamedTempFile::new_in(parent)
+            .with_context(|| format!("failed to create temporary file in {}", parent.display()))?;
+
+        let outcome = {
+            let mut writer = BufWriter::new(temp.as_file_mut());
+            clean_stream(&mut reader, &mut writer, &cleaner)?
+        };
+
+        if outcome.changes_made > 0 {
+            let permissions = metadata.permissions();
+            temp.persist(input_path)
+                .with_context(|| format!("failed to replace {}", input_path.display()))?;
+            let _ = fs::set_permissions(input_path, permissions);
+        } else {
+            temp.close()
+                .context("failed to remove temporary file after no-op inplace run")?;
+        }
+        (outcome.stats, outcome.changes_made)
+    } else if cli.stream {
+        let outcome = if let Some(ref path) = cli.input {
+            let file = fs::File::open(path)
+                .with_context(|| format!("failed to open {}", path.display()))?;
+            let mut reader = BufReader::new(file);
+            let stdout = io::stdout();
+            let mut handle = stdout.lock();
+            let mut writer = BufWriter::new(&mut handle);
+            clean_stream(&mut reader, &mut writer, &cleaner)?
+        } else {
+            let stdin = io::stdin();
+            let handle = stdin.lock();
+            let mut reader = BufReader::new(handle);
+            let stdout = io::stdout();
+            let mut handle = stdout.lock();
+            let mut writer = BufWriter::new(&mut handle);
+            clean_stream(&mut reader, &mut writer, &cleaner)?
+        };
+
+        (outcome.stats, outcome.changes_made)
+    } else {
+        let input = read_input(cli.input.as_deref(), MAX_INPUT_BYTES)?;
+        let result = cleaner.clean(&input);
+        write_output(&result)?;
+        (result.stats.clone(), result.changes_made)
+    };
 
     if cli.stats {
-        write_stats(&result);
+        let stats_result = CleaningResult {
+            text: String::new(),
+            changes_made,
+            stats: aggregate_stats.clone(),
+        };
+        write_stats(&stats_result);
+    }
+
+    if cli.stats_json {
+        let summary = StatsSummary {
+            changed: changes_made > 0,
+            changes_made,
+            stats: &aggregate_stats,
+        };
+        let mut stderr = io::stderr().lock();
+        write_stats_json(&mut stderr, &summary)?;
+    }
+
+    if cli.exit_code {
+        std::process::exit(if changes_made == 0 { 0 } else { 1 });
     }
 
     Ok(())
@@ -171,6 +248,22 @@ struct Cli {
     /// Print a summary of applied transformations to stderr.
     #[arg(long, short = 's', action = ArgAction::SetTrue)]
     stats: bool,
+
+    /// Emit a JSON summary of changes to stderr.
+    #[arg(long = "stats-json", action = ArgAction::SetTrue)]
+    stats_json: bool,
+
+    /// Set the process exit code to 1 when changes are made.
+    #[arg(long, action = ArgAction::SetTrue)]
+    exit_code: bool,
+
+    /// Process the input in a streaming fashion (line by line).
+    #[arg(long, action = ArgAction::SetTrue)]
+    stream: bool,
+
+    /// Apply the transformation directly to the input file.
+    #[arg(long = "inplace", action = ArgAction::SetTrue)]
+    inplace: bool,
 }
 
 impl Cli {

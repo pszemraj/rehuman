@@ -57,10 +57,19 @@ Two binaries ship with the crate:
   - Defaults enforce keyboard-only output and drop emoji. Override with flags such as `--keep-emoji`, `--keyboard-only=false`, `--unicode-normalization nfkc`, or `--line-endings crlf`.
   - Persist your preferred knobs with `--save-config`. Config lives under the platform config dir (e.g. `~/.config/rehuman/config.toml`); use `--config <path>` to point elsewhere.
   - Inspect or manage settings with `--print-config` (shows the effective TOML) and `--reset-config` (removes the stored defaults before running).
+  - Batch-friendly helpers: `--stream` processes input line-by-line, `--inplace` rewrites the provided file safely, `--stats-json` emits machine-readable summaries, and `--exit-code` sets the status to `1` when changes were made.
 - `ishuman` checks whether text would change. It prints `1` when no normalization is needed and `0` otherwise.
-  - `ishuman notes.txt` uses the same config/flags as `rehuman`. Add `--stats` for a breakdown (stderr) or `--exit-code` to surface the verdict via the process status.
+  - `ishuman notes.txt` uses the same config/flags as `rehuman`. Add `--stats` for a breakdown (stderr), `--json` for a structured response, or `--exit-code` to surface the verdict via the process status.
 
-Unicode tables are generated during `cargo build` from the official Unicode Character Database, so the binaries remain self-contained—no runtime downloads needed.
+## Roadmap
+
+- International keyboard mode with a curated non-ASCII allowlist (€, £, §, …).
+- Optional transliteration path when dropping non-ASCII characters in keyboard-only mode.
+- Toggle to preserve join controls and additional ellipsis variants.
+- Automate Unicode data refresh (CI job + script).
+- Benchmark suite (open an issue if you need this sooner than later).
+
+Unicode tables are generated during `cargo build` from the official Unicode Character Database, so the binaries remain self-contained-no runtime downloads needed.
 
 ## Feature flags
 
