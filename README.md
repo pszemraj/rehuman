@@ -2,6 +2,10 @@
 
 Unicode-safe text cleaning & typographic normalization for Rust.
 
+This crate is a rewrite of [humanize-ai-lib](https://github.com/Nordth/humanize-ai-lib) by [Nordth](https://github.com/Nordth) in typescript, adapted for Rust and expanded with additional features/coverage.
+
+## Features, Functionality
+
 - Strip invisible/control chars (ZWSP, bidi isolates, BOM, etc.)
 - Normalize spaces (NBSP, narrow NBSP, figure/ideographic space → ` `)
 - Normalize dashes/quotes/ellipsis to plain ASCII
