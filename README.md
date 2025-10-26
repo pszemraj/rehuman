@@ -1,79 +1,56 @@
 # rehuman
 
-Unicode-safe text cleaning & typographic normalization for Rust.
+Unicode-safe text cleaning & normalization for Rust.
 
-This crate is a rewrite of [humanize-ai-lib](https://github.com/Nordth/humanize-ai-lib) by [Nordth](https://github.com/Nordth) in typescript, adapted for Rust and expanded with additional features/coverage.
+Strip invisible characters, normalize typography, and enforce consistent formatting-ideal for text sourced from web scraping, user input, or LLMs.
 
-## Features, Functionality
+## Why rehuman?
 
-- Strip invisible/control chars (ZWSP, bidi isolates, BOM, etc.)
-- Normalize spaces (NBSP, narrow NBSP, figure/ideographic space → ` `)
-- Normalize dashes/quotes/ellipsis to plain ASCII
-- Optional Unicode NFC/NFD/NFKC/NFKD (feature `unorm` - enabled by default)
-- Line-ending normalization (LF/CRLF/CR)
-- Collapsing/trimming whitespace
-- **Keyboard-only** filter with **emoji policy** (keep/drop)
-- Per-operation stats
+Untrusted text often contains:
 
-```rust
-use rehuman::{TextCleaner, CleaningOptions, UnicodeNormalizationMode, EmojiPolicy};
+- Zero-width spaces and control characters that break parsers
+- Mixed quote styles that defeat string matching
+- Non-breaking spaces that masquerade as regular spaces
+- Inconsistent Unicode normalization that produces duplicate keys
 
-let cleaner = TextCleaner::new(CleaningOptions {
-    normalize_quotes: true,
-    normalize_dashes: true,
-    unicode_normalization: UnicodeNormalizationMode::NFKC,
-    keyboard_only: false,
-    ..CleaningOptions::default()
-});
+**rehuman fixes this** in a single pass with predictable, measurable output.
 
-let out = cleaner.clean("“Hello—world…”\u{00A0}😀");
-assert_eq!(out.text, "\"Hello-world...\" 😀");
+## Installation
+
+```toml
+[dependencies]
+rehuman = "0.1.0" # replace with the latest published version
 ```
 
-### Keyboard-only & emoji policy
-
-`keyboard_only` restricts output to ASCII keyboard characters plus whitespace (`\n`, `\r`, `\t`).
-When `keyboard_only = true`, you can choose what to do with emoji via:
-
-- `emoji_policy = EmojiPolicy::Drop` (default): drop emoji
-- `emoji_policy = EmojiPolicy::Keep`: allow emoji to pass through even when non-ASCII
-
-### Minimal API
+## Quick Start
 
 ```rust
 use rehuman::{clean, humanize};
 
-let a = clean("Hi\u{200B}there");             // default preset
-let b = humanize("“Quote”—and…more");          // humanize preset
+// Basic preset: remove hidden chars, normalize spaces
+let cleaned = clean("Hi\u{200B}there"); // -> "Hi there"
+
+// Humanize preset: adds typographic fixes
+let humanized = humanize("“Quote”—and…more"); // -> "\"Quote\"-and...more"
 ```
 
-### CLI
+## Features
 
-Two binaries ship with the crate:
+- **Invisible character removal**: ZWSP, BOM, bidi isolates, control characters
+- **Space normalization**: NBSP, figure space, ideographic space → ASCII space
+- **Typography fixes**: curly quotes → ASCII, em/en dash → hyphen, ellipsis → three dots
+- **Unicode normalization**: NFC/NFD/NFKC/NFKD (`unorm` feature, enabled by default)
+- **Whitespace controls**: optional collapsing, trimming, and line-ending normalization
+- **Keyboard-only enforcement**: ASCII output with configurable emoji policy
+- **Detailed stats**: every cleaning run reports what changed
+- **CLI tooling**: `rehuman` (cleaner) and `ishuman` (detector) with streaming & in-place modes
 
-- `rehuman` cleans text. `cargo run -- <args>` runs it directly, or `cargo install --path .` makes it globally available.
-  - `rehuman notes.txt` cleans a file (<= 5 MB) and writes normalized text to stdout; redirect if you want a file: `rehuman notes.txt > notes.clean.txt`.
-  - Pipe data the same way: `curl https://example.com | rehuman --stats`. Stats are written to stderr so pipes stay clean.
-  - Defaults enforce keyboard-only output and drop emoji. Override with flags such as `--keep-emoji`, `--keyboard-only=false`, `--unicode-normalization nfkc`, or `--line-endings crlf`.
-  - Persist your preferred knobs with `--save-config`. Config lives under the platform config dir (e.g. `~/.config/rehuman/config.toml`); use `--config <path>` to point elsewhere.
-  - Inspect or manage settings with `--print-config` (shows the effective TOML) and `--reset-config` (removes the stored defaults before running).
-  - Batch-friendly helpers: `--stream` processes input line-by-line, `--inplace` rewrites the provided file safely, `--stats-json` emits machine-readable summaries, and `--exit-code` sets the status to `1` when changes were made.
-- `ishuman` checks whether text would change. It prints `1` when no normalization is needed and `0` otherwise.
-  - `ishuman notes.txt` uses the same config/flags as `rehuman`. Add `--stats` for a breakdown (stderr), `--json` for a structured response, or `--exit-code` to surface the verdict via the process status.
+## Documentation
 
-## Roadmap
-
-- International keyboard mode with a curated non-ASCII allowlist (€, £, §, …).
-- Optional transliteration path when dropping non-ASCII characters in keyboard-only mode.
-- Toggle to preserve join controls and additional ellipsis variants.
-- Automate Unicode data refresh (CI job + script).
-- Benchmark suite (open an issue if you need this sooner than later).
-
-Unicode tables are generated during `cargo build` from the official Unicode Character Database, so the binaries remain self-contained-no runtime downloads needed.
-
-## Feature flags
-
-- `unorm` *(default)* - uses `unicode-normalization` for NFC/NFD/NFKC/NFKD.
+- [API Reference](docs/api.md) - all functions, options, and statistics
+- [CLI Guide](docs/cli.md) - usage of `rehuman` and `ishuman`
+- [Examples](docs/examples.md) - recipes for common workloads
+- [Development Notes](docs/development.md) - roadmap & implementation details
 
 ## License
 
