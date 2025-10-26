@@ -462,12 +462,11 @@ impl TextCleaner {
 
         let mut working = working_input;
 
+        let mut line_ending_conversions = LineEndingCounts::default();
         if self.options.normalize_line_endings.is_some() {
-            let (lf, changed) = to_lf(working.as_ref());
+            let (lf, counts) = to_lf(working.as_ref());
+            line_ending_conversions = counts;
             working = Cow::Owned(lf);
-            if changed > 0 {
-                record_change!(changes, stats, line_endings_normalized, changed);
-            }
         }
 
         out.clear();
@@ -702,11 +701,26 @@ impl TextCleaner {
             }
         }
 
-        if let Some(style) = self.options.normalize_line_endings {
-            let restamp_changes = restamp_line_endings_mut(style, out);
-            if restamp_changes > 0 {
-                record_change!(changes, stats, line_endings_normalized, restamp_changes);
+        match self.options.normalize_line_endings {
+            Some(LineEndingStyle::Lf) => {
+                let total = line_ending_conversions.total();
+                if total > 0 {
+                    record_change!(changes, stats, line_endings_normalized, total);
+                }
             }
+            Some(style @ (LineEndingStyle::Crlf | LineEndingStyle::Cr)) => {
+                let restamp_changes = restamp_line_endings_mut(style, out);
+                let baseline = match style {
+                    LineEndingStyle::Crlf => line_ending_conversions.crlf,
+                    LineEndingStyle::Cr => line_ending_conversions.cr,
+                    LineEndingStyle::Lf => unreachable!(),
+                };
+                let net = restamp_changes.saturating_sub(baseline);
+                if net > 0 {
+                    record_change!(changes, stats, line_endings_normalized, net);
+                }
+            }
+            None => {}
         }
 
         (changes, stats)
@@ -932,28 +946,51 @@ fn is_newline_grapheme(g: &str) -> bool {
     matches!(g, "\n" | "\r" | "\r\n")
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+struct LineEndingCounts {
+    crlf: u64,
+    cr: u64,
+    nel: u64,
+    ls: u64,
+    ps: u64,
+}
+
+impl LineEndingCounts {
+    fn total(&self) -> u64 {
+        self.crlf + self.cr + self.nel + self.ls + self.ps
+    }
+}
+
 // ----------------- helpers -----------------
 
-fn to_lf(s: &str) -> (String, u64) {
-    // Convert CRLF, CR, NEL (U+0085), LS (U+2028) and PS (U+2029) to LF and count conversions.
+fn to_lf(s: &str) -> (String, LineEndingCounts) {
+    // Convert CRLF, CR, NEL (U+0085), LS (U+2028) and PS (U+2029) to LF and track conversions.
     let mut out = String::with_capacity(s.len());
-    let mut changed = 0u64;
+    let mut counts = LineEndingCounts::default();
     let mut it = s.chars().peekable();
     while let Some(c) = it.next() {
         if c == '\r' {
             if matches!(it.peek(), Some('\n')) {
                 it.next(); // consume LF
+                counts.crlf = counts.crlf.saturating_add(1);
+            } else {
+                counts.cr = counts.cr.saturating_add(1);
             }
             out.push('\n');
-            changed = changed.saturating_add(1);
-        } else if matches!(c, '\u{0085}' | '\u{2028}' | '\u{2029}') {
+        } else if c == '\u{0085}' {
             out.push('\n');
-            changed = changed.saturating_add(1);
+            counts.nel = counts.nel.saturating_add(1);
+        } else if c == '\u{2028}' {
+            out.push('\n');
+            counts.ls = counts.ls.saturating_add(1);
+        } else if c == '\u{2029}' {
+            out.push('\n');
+            counts.ps = counts.ps.saturating_add(1);
         } else {
             out.push(c);
         }
     }
-    (out, changed)
+    (out, counts)
 }
 
 fn restamp_line_endings_mut(style: LineEndingStyle, text: &mut String) -> u64 {
