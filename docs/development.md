@@ -2,6 +2,9 @@
 
 ## Roadmap
 
+> [!TIP]
+> Interested in seeing a feature sooner? See [form here](https://github.com/pszemraj/rehuman/compare)
+
 - [ ] International keyboard mode with a curated non-ASCII allowlist (€, £, §, …)
 - [ ] Optional transliteration when dropping non-ASCII characters in keyboard-only mode
 - [ ] Toggle to preserve join controls and handle additional ellipsis variants

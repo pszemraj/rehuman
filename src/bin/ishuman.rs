@@ -124,6 +124,11 @@ struct Cli {
     #[arg(long, value_enum)]
     unicode_normalization: Option<UnicodeNormalizationChoice>,
 
+    /// Strip bidi control characters (true/false, default false)
+    #[cfg(feature = "security")]
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    strip_bidi_controls: Option<bool>,
+
     /// Path to config file. Defaults to platform config directory.
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
@@ -156,6 +161,8 @@ impl Cli {
             collapse_whitespace: self.collapse_whitespace,
             line_endings: self.line_endings,
             unicode_normalization: self.unicode_normalization,
+            #[cfg(feature = "security")]
+            strip_bidi_controls: self.strip_bidi_controls,
         };
 
         if self.keep_emoji {

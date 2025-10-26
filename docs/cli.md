@@ -40,6 +40,9 @@ rehuman --inplace notes.txt
 rehuman --stream < huge.log > huge.clean.log
 ```
 
+> [!NOTE]
+> The CLI shares its defaults with the `rehuman::clean` helper: keyboard-only output with emoji dropped.
+
 ### Output Options
 
 | Flag                             | Description                                                      |

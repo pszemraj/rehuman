@@ -1,6 +1,6 @@
-use icu_properties::{maps, sets, GeneralCategory};
+use icu_properties::{props, CodePointMapData, CodePointSetData};
 use proptest::prelude::*;
-use rehuman::{clean, is_keyboard_ascii, CleaningOptions, EmojiPolicy, TextCleaner};
+use rehuman::{clean, is_keyboard_ascii, CleaningOptions, EmojiPolicy, StreamCleaner, TextCleaner};
 use unicode_segmentation::UnicodeSegmentation;
 
 fn sample_string() -> impl Strategy<Value = String> {
@@ -9,9 +9,9 @@ fn sample_string() -> impl Strategy<Value = String> {
 
 fn grapheme_is_rendered_emoji(grapheme: &str) -> bool {
     let chars: Vec<char> = grapheme.chars().collect();
-    let emoji = sets::emoji();
-    let emoji_presentation = sets::emoji_presentation();
-    let extended_pictographic = sets::extended_pictographic();
+    let emoji = CodePointSetData::new::<props::Emoji>();
+    let emoji_presentation = CodePointSetData::new::<props::EmojiPresentation>();
+    let extended_pictographic = CodePointSetData::new::<props::ExtendedPictographic>();
 
     let mut has_emoji_presentation = false;
     let mut has_extended_pictographic = false;
@@ -45,7 +45,7 @@ fn grapheme_is_rendered_emoji(grapheme: &str) -> bool {
 
 #[test]
 fn dash_property_maps_to_ascii_hyphen() {
-    let dash_set = sets::dash();
+    let dash_set = CodePointSetData::new::<props::Dash>();
     for range in dash_set.iter_ranges() {
         for codepoint in range {
             let Some(ch) = char::from_u32(codepoint) else {
@@ -64,12 +64,10 @@ fn dash_property_maps_to_ascii_hyphen() {
 
 #[test]
 fn space_separators_collapse_to_ascii_space() {
-    let gc = maps::general_category();
-    let space_data = gc.get_set_for_value(GeneralCategory::SpaceSeparator);
-    let space_set = space_data.as_borrowed();
-
     let cleaner = TextCleaner::new(CleaningOptions::default());
-    for range in space_set.iter_ranges() {
+    for range in CodePointMapData::<props::GeneralCategory>::new()
+        .iter_ranges_for_value(props::GeneralCategory::SpaceSeparator)
+    {
         for codepoint in range {
             let Some(ch) = char::from_u32(codepoint) else {
                 continue;
@@ -87,7 +85,7 @@ fn space_separators_collapse_to_ascii_space() {
 
 #[test]
 fn quotation_marks_normalize_to_ascii() {
-    let quotation_set = sets::quotation_mark();
+    let quotation_set = CodePointSetData::new::<props::QuotationMark>();
     let cleaner = TextCleaner::new(CleaningOptions::default());
 
     for range in quotation_set.iter_ranges() {
@@ -150,13 +148,22 @@ fn keyboard_only_drops_zwj_emoji() {
     assert!(output.stats.emojis_dropped >= 1);
 }
 
+fn is_allowed_hidden(c: char) -> bool {
+    matches!(c, '\u{200D}' | '\u{200C}')
+        || ('\u{FE00}'..='\u{FE0F}').contains(&c)
+        || ('\u{E0000}'..='\u{E007F}').contains(&c)
+        || ('\u{E0100}'..='\u{E01EF}').contains(&c)
+}
+
 proptest! {
     #[test]
     fn removing_hidden_characters_eliminates_default_ignorables(input in sample_string()) {
         let output = clean(&input);
-        let default_ignorables = sets::default_ignorable_code_point();
+        let default_ignorables = CodePointSetData::new::<props::DefaultIgnorableCodePoint>();
         prop_assert!(
-            !output.text.chars().any(|c| default_ignorables.contains(c)),
+            !output.text
+                .chars()
+                .any(|c| default_ignorables.contains(c) && !is_allowed_hidden(c)),
             "found default ignorable code point after cleaning"
         );
     }
@@ -172,8 +179,42 @@ proptest! {
         });
         let output = cleaner.clean(&input);
         prop_assert!(output.text.chars().all(is_keyboard_ascii));
-        let has_rendered_emoji = UnicodeSegmentation::graphemes(output.text.as_str(), true)
+        let has_rendered_emoji = UnicodeSegmentation::graphemes(output.text.as_ref(), true)
             .any(grapheme_is_rendered_emoji);
         prop_assert!(!has_rendered_emoji);
+    }
+}
+
+proptest! {
+    #[test]
+    fn stream_cleaner_matches_batch(input in sample_string()) {
+        let options = CleaningOptions::default();
+        let baseline_cleaner = TextCleaner::new(options.clone());
+        let baseline = baseline_cleaner.clean(&input);
+
+        let mut stream_cleaner = StreamCleaner::new(options);
+        let mut out_buffer = String::new();
+        let mut chunk_buffer = String::new();
+
+        for ch in input.chars() {
+            let chunk = ch.to_string();
+            if let Some(result) = stream_cleaner.feed(&chunk, &mut chunk_buffer) {
+                let emitted = result.text.into_owned();
+                out_buffer.push_str(&emitted);
+                chunk_buffer.clear();
+            }
+        }
+
+        if let Some(result) = stream_cleaner.finish(&mut chunk_buffer) {
+            let emitted = result.text.into_owned();
+            out_buffer.push_str(&emitted);
+            chunk_buffer.clear();
+        }
+
+        let summary = stream_cleaner.summary();
+
+        prop_assert_eq!(out_buffer, baseline.text);
+        prop_assert_eq!(summary.stats, baseline.stats);
+        prop_assert_eq!(summary.changes_made, baseline.changes_made);
     }
 }

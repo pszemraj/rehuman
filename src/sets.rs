@@ -1,8 +1,16 @@
-use icu_properties::sets;
+use std::sync::OnceLock;
+
+use icu_properties::{props, CodePointSetData, CodePointSetDataBorrowed};
+
+static DEFAULT_IGNORABLES: OnceLock<CodePointSetDataBorrowed<'static>> = OnceLock::new();
+
+static EMOJI_SET: OnceLock<CodePointSetDataBorrowed<'static>> = OnceLock::new();
 
 /// Hidden/format-like characters defined by Default_Ignorable_Code_Point (DI).
 pub fn is_hidden_char(c: char) -> bool {
-    sets::default_ignorable_code_point().contains(c)
+    DEFAULT_IGNORABLES
+        .get_or_init(CodePointSetData::new::<props::DefaultIgnorableCodePoint>)
+        .contains(c)
 }
 
 /// ASCII keyboard (US) characters + whitespace controls typically produced by keyboards.
@@ -13,5 +21,7 @@ pub fn is_keyboard_ascii(c: char) -> bool {
 
 /// Emoji detection via the Unicode `Emoji` binary property.
 pub fn is_emoji(c: char) -> bool {
-    sets::emoji().contains(c)
+    EMOJI_SET
+        .get_or_init(CodePointSetData::new::<props::Emoji>)
+        .contains(c)
 }

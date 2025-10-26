@@ -1,10 +1,11 @@
 //! rehuman — Unicode‑safe text cleaning & typographic normalization.
 
+use icu_properties::{props, CodePointSetData, CodePointSetDataBorrowed};
+use serde::Serialize;
+use std::borrow::Cow;
+use std::fmt;
 #[cfg(feature = "unorm")]
 use unicode_normalization::UnicodeNormalization;
-
-use icu_properties::sets as icu_sets;
-use serde::Serialize;
 use unicode_segmentation::UnicodeSegmentation;
 
 mod generated;
@@ -44,44 +45,121 @@ pub enum EmojiPolicy {
 /// Detailed statistics about cleaning operations.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct CleaningStats {
-    pub hidden_chars_removed: usize,
-    pub trailing_whitespace_removed: usize,
-    pub spaces_normalized: usize,
-    pub dashes_normalized: usize,
-    pub quotes_normalized: usize,
-    pub other_normalized: usize,
-    pub control_chars_removed: usize,
-    pub line_endings_normalized: usize,
-    pub non_keyboard_removed: usize,
-    pub emojis_dropped: usize,
+    pub hidden_chars_removed: u64,
+    pub trailing_whitespace_removed: u64,
+    pub spaces_normalized: u64,
+    pub dashes_normalized: u64,
+    pub quotes_normalized: u64,
+    pub other_normalized: u64,
+    pub control_chars_removed: u64,
+    pub line_endings_normalized: u64,
+    pub non_keyboard_removed: u64,
+    pub emojis_dropped: u64,
+    #[cfg(feature = "security")]
+    pub bidi_controls_removed: u64,
 }
 
 /// Result of a text cleaning operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct CleaningResult {
-    pub text: String,
-    pub changes_made: usize,
+pub struct CleaningResult<'a> {
+    pub text: Cow<'a, str>,
+    pub changes_made: u64,
     pub stats: CleaningStats,
 }
 
-impl CleaningStats {
-    /// Merge another stats snapshot into this one.
-    pub fn accumulate(&mut self, other: &CleaningStats) {
-        self.hidden_chars_removed += other.hidden_chars_removed;
-        self.trailing_whitespace_removed += other.trailing_whitespace_removed;
-        self.spaces_normalized += other.spaces_normalized;
-        self.dashes_normalized += other.dashes_normalized;
-        self.quotes_normalized += other.quotes_normalized;
-        self.other_normalized += other.other_normalized;
-        self.control_chars_removed += other.control_chars_removed;
-        self.line_endings_normalized += other.line_endings_normalized;
-        self.non_keyboard_removed += other.non_keyboard_removed;
-        self.emojis_dropped += other.emojis_dropped;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleaningError {
+    NormalizationUnavailable { requested: UnicodeNormalizationMode },
+}
+
+impl fmt::Display for CleaningError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CleaningError::NormalizationUnavailable { requested } => write!(
+                f,
+                "Unicode normalization {:?} requested but the 'unorm' feature is disabled",
+                requested
+            ),
+        }
     }
 }
 
+impl std::error::Error for CleaningError {}
+
+impl CleaningStats {
+    /// Merge another stats snapshot into this one.
+    #[cfg(feature = "stats")]
+    pub fn accumulate(&mut self, other: &CleaningStats) {
+        self.hidden_chars_removed = self
+            .hidden_chars_removed
+            .saturating_add(other.hidden_chars_removed);
+        self.trailing_whitespace_removed = self
+            .trailing_whitespace_removed
+            .saturating_add(other.trailing_whitespace_removed);
+        self.spaces_normalized = self
+            .spaces_normalized
+            .saturating_add(other.spaces_normalized);
+        self.dashes_normalized = self
+            .dashes_normalized
+            .saturating_add(other.dashes_normalized);
+        self.quotes_normalized = self
+            .quotes_normalized
+            .saturating_add(other.quotes_normalized);
+        self.other_normalized = self.other_normalized.saturating_add(other.other_normalized);
+        self.control_chars_removed = self
+            .control_chars_removed
+            .saturating_add(other.control_chars_removed);
+        self.line_endings_normalized = self
+            .line_endings_normalized
+            .saturating_add(other.line_endings_normalized);
+        self.non_keyboard_removed = self
+            .non_keyboard_removed
+            .saturating_add(other.non_keyboard_removed);
+        self.emojis_dropped = self.emojis_dropped.saturating_add(other.emojis_dropped);
+        #[cfg(feature = "security")]
+        {
+            self.bidi_controls_removed = self
+                .bidi_controls_removed
+                .saturating_add(other.bidi_controls_removed);
+        }
+    }
+
+    #[cfg(not(feature = "stats"))]
+    #[inline]
+    pub fn accumulate(&mut self, _: &CleaningStats) {
+        // No-op when stats are disabled.
+    }
+}
+
+#[cfg(feature = "stats")]
+macro_rules! record_stat {
+    ($stats:expr, $field:ident, $amount:expr) => {{
+        $stats.$field = $stats.$field.saturating_add($amount);
+    }};
+}
+
+#[cfg(not(feature = "stats"))]
+macro_rules! record_stat {
+    ($stats:expr, $field:ident, $amount:expr) => {{
+        let _ = &$stats;
+        let _ = stringify!($field);
+        let _ = &$amount;
+    }};
+}
+
+macro_rules! record_change {
+    ($changes:expr, $stats:expr, $field:ident) => {{
+        record_change!($changes, $stats, $field, 1u64);
+    }};
+    ($changes:expr, $stats:expr, $field:ident, $amount:expr) => {{
+        let amount = ($amount) as u64;
+        $changes = $changes.saturating_add(amount);
+        record_stat!($stats, $field, amount);
+    }};
+}
+
 /// Configuration for cleaning.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CleaningOptions {
     pub remove_hidden: bool,
     pub remove_trailing_whitespace: bool,
@@ -95,6 +173,13 @@ pub struct CleaningOptions {
     pub collapse_whitespace: bool,
     pub normalize_line_endings: Option<LineEndingStyle>,
     pub unicode_normalization: UnicodeNormalizationMode,
+    #[cfg_attr(not(feature = "security"), doc(hidden))]
+    pub strip_bidi_controls: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CleaningOptionsBuilder {
+    options: CleaningOptions,
 }
 
 impl Default for CleaningOptions {
@@ -106,17 +191,24 @@ impl Default for CleaningOptions {
             normalize_dashes: true,
             normalize_quotes: true,
             normalize_other: true,
-            keyboard_only: false,
+            keyboard_only: true,
             emoji_policy: EmojiPolicy::Drop,
             remove_control_chars: true,
             collapse_whitespace: false,
             normalize_line_endings: None,
             unicode_normalization: UnicodeNormalizationMode::None,
+            strip_bidi_controls: false,
         }
     }
 }
 
 impl CleaningOptions {
+    pub fn builder() -> CleaningOptionsBuilder {
+        CleaningOptionsBuilder {
+            options: CleaningOptions::default(),
+        }
+    }
+
     /// Minimal preset: only removes hidden/invisible chars.
     pub fn minimal() -> Self {
         Self {
@@ -132,24 +224,45 @@ impl CleaningOptions {
             collapse_whitespace: false,
             normalize_line_endings: None,
             unicode_normalization: UnicodeNormalizationMode::None,
+            strip_bidi_controls: false,
         }
     }
 
     /// Balanced preset for day-to-day text.
     pub fn balanced() -> Self {
         Self {
+            remove_hidden: true,
+            remove_trailing_whitespace: true,
+            normalize_spaces: true,
+            normalize_dashes: true,
+            normalize_quotes: true,
+            normalize_other: true,
+            keyboard_only: false,
+            emoji_policy: EmojiPolicy::Drop,
+            remove_control_chars: true,
             unicode_normalization: UnicodeNormalizationMode::NFC,
             collapse_whitespace: false,
-            ..Self::default()
+            normalize_line_endings: None,
+            strip_bidi_controls: false,
         }
     }
 
     /// Humanize preset for AI/LLM-ish text.
     pub fn humanize() -> Self {
         Self {
+            remove_hidden: true,
+            remove_trailing_whitespace: true,
+            normalize_spaces: true,
+            normalize_dashes: true,
+            normalize_quotes: true,
+            normalize_other: true,
+            keyboard_only: false,
+            emoji_policy: EmojiPolicy::Drop,
+            remove_control_chars: true,
             unicode_normalization: UnicodeNormalizationMode::NFKC,
             collapse_whitespace: true,
-            ..Self::default()
+            normalize_line_endings: None,
+            strip_bidi_controls: false,
         }
     }
 
@@ -168,7 +281,80 @@ impl CleaningOptions {
             collapse_whitespace: true,
             normalize_line_endings: Some(LineEndingStyle::Lf),
             unicode_normalization: UnicodeNormalizationMode::NFKC,
+            strip_bidi_controls: true,
         }
+    }
+}
+
+impl CleaningOptionsBuilder {
+    pub fn remove_hidden(mut self, value: bool) -> Self {
+        self.options.remove_hidden = value;
+        self
+    }
+
+    pub fn remove_trailing_whitespace(mut self, value: bool) -> Self {
+        self.options.remove_trailing_whitespace = value;
+        self
+    }
+
+    pub fn normalize_spaces(mut self, value: bool) -> Self {
+        self.options.normalize_spaces = value;
+        self
+    }
+
+    pub fn normalize_dashes(mut self, value: bool) -> Self {
+        self.options.normalize_dashes = value;
+        self
+    }
+
+    pub fn normalize_quotes(mut self, value: bool) -> Self {
+        self.options.normalize_quotes = value;
+        self
+    }
+
+    pub fn normalize_other(mut self, value: bool) -> Self {
+        self.options.normalize_other = value;
+        self
+    }
+
+    pub fn keyboard_only(mut self, value: bool) -> Self {
+        self.options.keyboard_only = value;
+        self
+    }
+
+    pub fn emoji_policy(mut self, policy: EmojiPolicy) -> Self {
+        self.options.emoji_policy = policy;
+        self
+    }
+
+    pub fn remove_control_chars(mut self, value: bool) -> Self {
+        self.options.remove_control_chars = value;
+        self
+    }
+
+    pub fn collapse_whitespace(mut self, value: bool) -> Self {
+        self.options.collapse_whitespace = value;
+        self
+    }
+
+    pub fn normalize_line_endings(mut self, value: Option<LineEndingStyle>) -> Self {
+        self.options.normalize_line_endings = value;
+        self
+    }
+
+    pub fn unicode_normalization(mut self, mode: UnicodeNormalizationMode) -> Self {
+        self.options.unicode_normalization = mode;
+        self
+    }
+
+    #[cfg_attr(not(feature = "security"), doc(hidden))]
+    pub fn strip_bidi_controls(mut self, value: bool) -> Self {
+        self.options.strip_bidi_controls = value;
+        self
+    }
+
+    pub fn build(self) -> CleaningOptions {
+        self.options
     }
 }
 
@@ -182,107 +368,204 @@ impl TextCleaner {
         Self { options }
     }
 
-    pub fn clean(&self, text: &str) -> CleaningResult {
-        let mut stats = CleaningStats::default();
+    pub fn options(&self) -> &CleaningOptions {
+        &self.options
+    }
 
+    pub fn clean<'a>(&self, text: &'a str) -> CleaningResult<'a> {
+        self.try_clean(text).unwrap_or_else(|err| {
+            panic!(
+                "clean() failed: {err}. Enable the 'unorm' feature or call try_clean() to handle the error"
+            )
+        })
+    }
+
+    pub fn clean_into<'output>(
+        &self,
+        text: &str,
+        out: &'output mut String,
+    ) -> CleaningResult<'output> {
+        self.try_clean_into(text, out).unwrap_or_else(|err| {
+            panic!(
+                "clean_into() failed: {err}. Enable the 'unorm' feature or call try_clean_into() to handle the error"
+            )
+        })
+    }
+
+    pub fn try_clean<'a>(&self, text: &'a str) -> Result<CleaningResult<'a>, CleaningError> {
         if text.is_empty() {
-            return CleaningResult {
-                text: String::new(),
+            return Ok(CleaningResult {
+                text: Cow::Borrowed(text),
                 changes_made: 0,
-                stats,
-            };
+                stats: CleaningStats::default(),
+            });
         }
 
         if self.can_use_ascii_fast_path(text) {
-            return CleaningResult {
-                text: text.to_owned(),
+            return Ok(CleaningResult {
+                text: Cow::Borrowed(text),
                 changes_made: 0,
-                stats,
-            };
+                stats: CleaningStats::default(),
+            });
         }
 
-        let mut working = self.apply_unicode_normalization(text);
+        let working = self.normalize_input(text)?;
+        let mut buffer = String::with_capacity(working.len());
+        let (changes, stats) = self.clean_into_internal(working, &mut buffer);
+        Ok(CleaningResult {
+            text: Cow::Owned(buffer),
+            changes_made: changes,
+            stats,
+        })
+    }
 
+    pub fn try_clean_into<'output>(
+        &self,
+        text: &str,
+        out: &'output mut String,
+    ) -> Result<CleaningResult<'output>, CleaningError> {
+        out.clear();
+
+        if text.is_empty() {
+            return Ok(CleaningResult {
+                text: Cow::Borrowed(out.as_str()),
+                changes_made: 0,
+                stats: CleaningStats::default(),
+            });
+        }
+
+        if self.can_use_ascii_fast_path(text) {
+            out.push_str(text);
+            return Ok(CleaningResult {
+                text: Cow::Borrowed(out.as_str()),
+                changes_made: 0,
+                stats: CleaningStats::default(),
+            });
+        }
+
+        let working = self.normalize_input(text)?;
+        let (changes, stats) = self.clean_into_internal(working, out);
+        Ok(CleaningResult {
+            text: Cow::Borrowed(out.as_str()),
+            changes_made: changes,
+            stats,
+        })
+    }
+
+    fn clean_into_internal(
+        &self,
+        working_input: Cow<'_, str>,
+        out: &mut String,
+    ) -> (u64, CleaningStats) {
+        let mut stats = CleaningStats::default();
+        let mut changes = 0u64;
+
+        let mut working = working_input;
+
+        let mut line_ending_conversions = LineEndingCounts::default();
         if self.options.normalize_line_endings.is_some() {
-            let (lf, changed) = to_lf(&working);
-            working = lf;
-            stats.line_endings_normalized += changed;
+            let (lf, counts) = to_lf(working.as_ref());
+            line_ending_conversions = counts;
+            working = Cow::Owned(lf);
         }
 
-        let mut out = String::with_capacity(working.len());
+        out.clear();
+        out.reserve(working.len());
+
         let mut pending_ws: usize = 0;
+        let mut cap_next_whitespace = false;
+        let mut drop_leading_whitespace = false;
+        let mut emitted_anything = false;
         let trim = self.options.remove_trailing_whitespace;
         let collapse = self.options.collapse_whitespace;
 
-        let default_ignorables = icu_sets::default_ignorable_code_point();
-        let emoji_set = icu_sets::emoji();
-        let emoji_presentation = icu_sets::emoji_presentation();
-        let extended_pictographic = icu_sets::extended_pictographic();
+        let mut emoji_classifier: Option<EmojiClassifier> = None;
+        let default_ignorables = CodePointSetData::new::<props::DefaultIgnorableCodePoint>();
+        let mut cluster_buffer = String::new();
+        #[cfg(feature = "security")]
+        let bidi_controls: Option<CodePointSetDataBorrowed<'static>> =
+            if self.options.strip_bidi_controls {
+                Some(CodePointSetData::new::<props::BidiControl>())
+            } else {
+                None
+            };
 
-        for grapheme in UnicodeSegmentation::graphemes(working.as_str(), true) {
-            let mut chars: Vec<char> = grapheme.chars().collect();
-            if chars.is_empty() {
-                continue;
-            }
-
-            let emoji_context = classify_emoji_cluster(
-                &chars,
-                emoji_set,
-                emoji_presentation,
-                extended_pictographic,
-            );
-            let is_emoji_cluster = emoji_context.is_rendered;
-
-            if self.options.keyboard_only
-                && matches!(self.options.emoji_policy, EmojiPolicy::Drop)
-                && is_emoji_cluster
-            {
-                stats.emojis_dropped += 1;
+        for grapheme in UnicodeSegmentation::graphemes(working.as_ref(), true) {
+            if grapheme.is_empty() {
                 continue;
             }
 
             if is_newline_grapheme(grapheme) {
                 if trim {
-                    stats.trailing_whitespace_removed += pending_ws;
-                    pending_ws = 0;
+                    if pending_ws > 0 {
+                        record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
+                        pending_ws = 0;
+                        cap_next_whitespace = false;
+                    }
                 } else {
-                    flush_pending_whitespace(&mut out, pending_ws, collapse);
+                    flush_pending_whitespace(out, pending_ws, collapse);
                     pending_ws = 0;
+                    cap_next_whitespace = false;
                 }
                 out.push_str(grapheme);
+                emitted_anything = true;
+                drop_leading_whitespace = false;
                 continue;
             }
 
-            let keep_hidden = is_emoji_cluster
-                && (!self.options.keyboard_only
-                    || matches!(self.options.emoji_policy, EmojiPolicy::Keep));
+            let mut emoji_cluster_cache: Option<bool> = None;
+            let mut ensure_emoji_cluster = |classifier: &mut Option<EmojiClassifier>| -> bool {
+                if let Some(value) = emoji_cluster_cache {
+                    return value;
+                }
+                if grapheme.is_ascii() {
+                    emoji_cluster_cache = Some(false);
+                    return false;
+                }
+                if !self.options.keyboard_only && !self.options.remove_hidden {
+                    emoji_cluster_cache = Some(false);
+                    return false;
+                }
+                let classifier = classifier.get_or_insert_with(EmojiClassifier::new);
+                let value = classify_emoji_cluster(grapheme, classifier).is_rendered;
+                emoji_cluster_cache = Some(value);
+                value
+            };
 
-            let mut cluster_buffer = String::new();
+            cluster_buffer.clear();
+            cluster_buffer.reserve(grapheme.len());
             let mut emitted_directly = false;
 
-            for mut c in chars.drain(..) {
-                if default_ignorables.contains(c) {
+            for mut c in grapheme.chars() {
+                #[cfg(feature = "security")]
+                if let Some(set) = bidi_controls {
+                    if set.contains(c) {
+                        record_change!(changes, stats, bidi_controls_removed);
+                        continue;
+                    }
+                }
+
+                if self.options.remove_hidden && default_ignorables.contains(c) {
+                    let keep_hidden = (!self.options.keyboard_only
+                        || matches!(self.options.emoji_policy, EmojiPolicy::Keep))
+                        && ensure_emoji_cluster(&mut emoji_classifier);
                     // TODO: expose a preserve-joiners toggle so ZWJ/ZWNJ handling can be configured.
-                    if self.options.remove_hidden {
-                        if keep_hidden {
-                            cluster_buffer.push(c);
-                        } else {
-                            stats.hidden_chars_removed += 1;
-                        }
-                    } else {
+                    if keep_hidden {
                         cluster_buffer.push(c);
+                    } else {
+                        record_change!(changes, stats, hidden_chars_removed);
                     }
                     continue;
                 }
 
                 if self.options.remove_control_chars && is_disallowed_control(c) {
-                    stats.control_chars_removed += 1;
+                    record_change!(changes, stats, control_chars_removed);
                     continue;
                 }
 
                 if self.options.normalize_spaces {
                     if let Some(&mapped) = SPACE_MAP.get(&c) {
-                        stats.spaces_normalized += 1;
+                        record_change!(changes, stats, spaces_normalized);
                         c = mapped;
                     }
                 }
@@ -290,7 +573,7 @@ impl TextCleaner {
                 if self.options.normalize_dashes {
                     if let Some(mapped) = map_dash(c) {
                         if mapped != c {
-                            stats.dashes_normalized += 1;
+                            record_change!(changes, stats, dashes_normalized);
                         }
                         c = mapped;
                     }
@@ -299,7 +582,7 @@ impl TextCleaner {
                 if self.options.normalize_quotes {
                     if let Some(mapped) = map_quote(c) {
                         if mapped != c {
-                            stats.quotes_normalized += 1;
+                            record_change!(changes, stats, quotes_normalized);
                         }
                         c = mapped;
                     }
@@ -309,13 +592,21 @@ impl TextCleaner {
                     match c {
                         FRACTION_SLASH => {
                             c = '/';
-                            stats.other_normalized += 1;
+                            record_change!(changes, stats, other_normalized);
                         }
                         HORIZONTAL_ELLIPSIS | MIDLINE_HORIZONTAL_ELLIPSIS => {
-                            flush_pending_whitespace(&mut out, pending_ws, collapse);
-                            pending_ws = 0;
+                            if pending_ws > 0 {
+                                if drop_leading_whitespace && !emitted_anything {
+                                    pending_ws = 0;
+                                } else {
+                                    flush_pending_whitespace(out, pending_ws, collapse);
+                                    pending_ws = 0;
+                                }
+                            }
                             out.push_str("...");
-                            stats.other_normalized += 1;
+                            emitted_anything = true;
+                            drop_leading_whitespace = false;
+                            record_change!(changes, stats, other_normalized);
                             emitted_directly = true;
                             break;
                         }
@@ -335,109 +626,247 @@ impl TextCleaner {
             }
 
             if cluster_buffer.chars().all(|ch| matches!(ch, ' ' | '\t')) {
-                pending_ws += cluster_buffer.chars().count();
+                let count = cluster_buffer.chars().count();
+                if cap_next_whitespace {
+                    pending_ws = 1;
+                    cap_next_whitespace = false;
+                } else {
+                    pending_ws = pending_ws.saturating_add(count);
+                }
                 continue;
             }
 
-            if pending_ws > 0 {
-                flush_pending_whitespace(&mut out, pending_ws, collapse);
-                pending_ws = 0;
-            }
-
             if self.options.keyboard_only {
+                let is_emoji_cluster = ensure_emoji_cluster(&mut emoji_classifier);
                 // TODO: offer an optional transliteration path when dropping non-ASCII characters.
-                if cluster_buffer.chars().all(is_keyboard_ascii)
-                    || (is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep))
-                {
+                let keep_cluster = cluster_buffer.chars().all(is_keyboard_ascii)
+                    || (is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep));
+
+                if keep_cluster {
+                    if pending_ws > 0 {
+                        if drop_leading_whitespace && !emitted_anything {
+                            pending_ws = 0;
+                        } else {
+                            flush_pending_whitespace(out, pending_ws, collapse);
+                            pending_ws = 0;
+                        }
+                    }
                     out.push_str(&cluster_buffer);
+                    emitted_anything = true;
+                    drop_leading_whitespace = false;
                 } else if is_emoji_cluster {
-                    stats.emojis_dropped += 1;
+                    record_change!(changes, stats, emojis_dropped);
+                    cluster_buffer.clear();
+                    cap_next_whitespace = true;
+                    drop_leading_whitespace = pending_ws == 0 && !emitted_anything;
+                    if pending_ws > 0 {
+                        pending_ws = 1;
+                    }
                 } else {
-                    stats.non_keyboard_removed += cluster_buffer.chars().count();
+                    let removed = cluster_buffer.chars().count();
+                    if removed > 0 {
+                        record_change!(changes, stats, non_keyboard_removed, removed);
+                    }
+                    cluster_buffer.clear();
+                    cap_next_whitespace = true;
+                    drop_leading_whitespace = pending_ws == 0 && !emitted_anything;
+                    if pending_ws > 0 {
+                        pending_ws = 1;
+                    }
                 }
             } else {
+                if pending_ws > 0 {
+                    if drop_leading_whitespace && !emitted_anything {
+                        pending_ws = 0;
+                    } else {
+                        flush_pending_whitespace(out, pending_ws, collapse);
+                        pending_ws = 0;
+                    }
+                }
                 out.push_str(&cluster_buffer);
+                emitted_anything = true;
+                drop_leading_whitespace = false;
             }
         }
 
         if trim {
-            stats.trailing_whitespace_removed += pending_ws;
-        } else {
-            flush_pending_whitespace(&mut out, pending_ws, collapse);
+            if pending_ws > 0 {
+                record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
+            }
+        } else if pending_ws > 0 {
+            if drop_leading_whitespace && !emitted_anything {
+                // drop leading whitespace that only existed due to removed clusters
+            } else {
+                flush_pending_whitespace(out, pending_ws, collapse);
+            }
         }
 
-        let mut text = out;
-        if let Some(style) = self.options.normalize_line_endings {
-            text = match style {
-                LineEndingStyle::Lf => text,
-                LineEndingStyle::Crlf => text.replace('\n', "\r\n"),
-                LineEndingStyle::Cr => text.replace('\n', "\r"),
-            };
+        match self.options.normalize_line_endings {
+            Some(LineEndingStyle::Lf) => {
+                let total = line_ending_conversions.total();
+                if total > 0 {
+                    record_change!(changes, stats, line_endings_normalized, total);
+                }
+            }
+            Some(style @ (LineEndingStyle::Crlf | LineEndingStyle::Cr)) => {
+                let restamp_changes = restamp_line_endings_mut(style, out);
+                let baseline = match style {
+                    LineEndingStyle::Crlf => line_ending_conversions.crlf,
+                    LineEndingStyle::Cr => line_ending_conversions.cr,
+                    LineEndingStyle::Lf => unreachable!(),
+                };
+                let net = restamp_changes.saturating_sub(baseline);
+                if net > 0 {
+                    record_change!(changes, stats, line_endings_normalized, net);
+                }
+            }
+            None => {}
         }
 
-        let changes_made = aggregate_changes(&stats);
-        CleaningResult {
-            text,
-            changes_made,
-            stats,
-        }
+        (changes, stats)
     }
 
-    fn apply_unicode_normalization(&self, text: &str) -> String {
+    fn normalize_input<'a>(&self, text: &'a str) -> Result<Cow<'a, str>, CleaningError> {
         match self.options.unicode_normalization {
-            UnicodeNormalizationMode::None => text.to_owned(),
+            UnicodeNormalizationMode::None => Ok(Cow::Borrowed(text)),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFD => text.nfd().collect(),
+            UnicodeNormalizationMode::NFD => Ok(Cow::Owned(text.nfd().collect())),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFC => text.nfc().collect(),
+            UnicodeNormalizationMode::NFC => Ok(Cow::Owned(text.nfc().collect())),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFKD => text.nfkd().collect(),
+            UnicodeNormalizationMode::NFKD => Ok(Cow::Owned(text.nfkd().collect())),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFKC => text.nfkc().collect(),
+            UnicodeNormalizationMode::NFKC => Ok(Cow::Owned(text.nfkc().collect())),
             #[cfg(not(feature = "unorm"))]
-            _ => text.to_owned(),
+            mode => Err(CleaningError::NormalizationUnavailable { requested: mode }),
         }
     }
 
     fn can_use_ascii_fast_path(&self, text: &str) -> bool {
-        if !text.is_ascii() {
-            return false;
+        text.is_ascii()
+            && !self.options.remove_trailing_whitespace
+            && !self.options.collapse_whitespace
+            && self.options.normalize_line_endings.is_none()
+            && !self.options.remove_control_chars
+            && matches!(
+                self.options.unicode_normalization,
+                UnicodeNormalizationMode::None
+            )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamSummary {
+    pub stats: CleaningStats,
+    pub changes_made: u64,
+}
+
+pub struct StreamCleaner {
+    cleaner: TextCleaner,
+    buffer: String,
+    total_stats: CleaningStats,
+    total_changes: u64,
+    has_emitted_output: bool,
+}
+
+impl StreamCleaner {
+    pub fn new(options: CleaningOptions) -> Self {
+        Self {
+            cleaner: TextCleaner::new(options),
+            buffer: String::new(),
+            total_stats: CleaningStats::default(),
+            total_changes: 0,
+            has_emitted_output: false,
         }
-        if self.options.keyboard_only
-            || self.options.collapse_whitespace
-            || self.options.normalize_line_endings.is_some()
-        {
-            return false;
+    }
+
+    pub fn from_cleaner(cleaner: TextCleaner) -> Self {
+        Self {
+            cleaner,
+            buffer: String::new(),
+            total_stats: CleaningStats::default(),
+            total_changes: 0,
+            has_emitted_output: false,
         }
-        if !matches!(
-            self.options.unicode_normalization,
-            UnicodeNormalizationMode::None
-        ) {
-            return false;
+    }
+
+    pub fn feed<'out>(
+        &mut self,
+        chunk: &str,
+        out: &'out mut String,
+    ) -> Option<CleaningResult<'out>> {
+        out.clear();
+        if chunk.is_empty() {
+            return None;
+        }
+        self.buffer.push_str(chunk);
+        let last_nl = self.buffer.rfind('\n')?;
+        let flush_end = last_nl + 1;
+        let to_process = self.buffer[..flush_end].to_owned();
+        self.buffer.drain(..flush_end);
+        Some(self.process_owned_chunk(to_process, out))
+    }
+
+    pub fn finish<'out>(&mut self, out: &'out mut String) -> Option<CleaningResult<'out>> {
+        out.clear();
+        if self.buffer.is_empty() {
+            return None;
+        }
+        let remainder = std::mem::take(&mut self.buffer);
+        Some(self.process_owned_chunk(remainder, out))
+    }
+
+    pub fn summary(&self) -> StreamSummary {
+        StreamSummary {
+            stats: self.total_stats.clone(),
+            changes_made: self.total_changes,
+        }
+    }
+
+    fn process_owned_chunk<'out>(
+        &mut self,
+        chunk: String,
+        out: &'out mut String,
+    ) -> CleaningResult<'out> {
+        const CONTEXT_SENTINEL: char = 'a';
+        let mut chunk = chunk;
+        let use_sentinel = self.has_emitted_output;
+        if use_sentinel {
+            chunk.insert(0, CONTEXT_SENTINEL);
         }
 
-        let mut trailing_ws = 0usize;
-        for c in text.chars() {
-            if self.options.remove_control_chars && is_disallowed_control(c) {
-                return false;
-            }
-            match c {
-                ' ' | '\t' => trailing_ws += 1,
-                '\n' | '\r' => {
-                    if self.options.remove_trailing_whitespace && trailing_ws > 0 {
-                        return false;
-                    }
-                    trailing_ws = 0;
-                }
-                _ => trailing_ws = 0,
-            }
+        let result = self.cleaner.try_clean(&chunk).unwrap_or_else(|err| {
+            panic!("StreamCleaner::feed failed: {err}. Enable the 'unorm' feature or use try_clean")
+        });
+        let CleaningResult {
+            text,
+            changes_made,
+            stats,
+        } = result;
+
+        out.clear();
+        let cleaned_text = text.as_ref();
+        if use_sentinel {
+            let stripped = cleaned_text
+                .strip_prefix(CONTEXT_SENTINEL)
+                .unwrap_or(cleaned_text);
+            out.push_str(stripped);
+        } else {
+            out.push_str(cleaned_text);
+        }
+        let emitted = &out[..];
+
+        self.total_stats.accumulate(&stats);
+        self.total_changes = self.total_changes.saturating_add(changes_made);
+        if !emitted.is_empty() {
+            self.has_emitted_output = true;
         }
 
-        if self.options.remove_trailing_whitespace && trailing_ws > 0 {
-            return false;
+        CleaningResult {
+            text: Cow::Borrowed(emitted),
+            changes_made,
+            stats,
         }
-
-        true
     }
 }
 
@@ -446,12 +875,23 @@ struct EmojiClusterContext {
     is_rendered: bool,
 }
 
-fn classify_emoji_cluster(
-    chars: &[char],
-    emoji: icu_properties::sets::CodePointSetDataBorrowed<'static>,
-    emoji_presentation: icu_properties::sets::CodePointSetDataBorrowed<'static>,
-    extended_pictographic: icu_properties::sets::CodePointSetDataBorrowed<'static>,
-) -> EmojiClusterContext {
+struct EmojiClassifier {
+    emoji: CodePointSetDataBorrowed<'static>,
+    emoji_presentation: CodePointSetDataBorrowed<'static>,
+    extended_pictographic: CodePointSetDataBorrowed<'static>,
+}
+
+impl EmojiClassifier {
+    fn new() -> Self {
+        Self {
+            emoji: CodePointSetData::new::<props::Emoji>(),
+            emoji_presentation: CodePointSetData::new::<props::EmojiPresentation>(),
+            extended_pictographic: CodePointSetData::new::<props::ExtendedPictographic>(),
+        }
+    }
+}
+
+fn classify_emoji_cluster(grapheme: &str, classifier: &EmojiClassifier) -> EmojiClusterContext {
     let mut has_emoji_presentation = false;
     let mut has_extended_pictographic = false;
     let mut has_emoji = false;
@@ -459,14 +899,14 @@ fn classify_emoji_cluster(
     let mut has_zwj = false;
     let mut has_keycap = false;
 
-    for &c in chars {
-        if emoji_presentation.contains(c) {
+    for c in grapheme.chars() {
+        if classifier.emoji_presentation.contains(c) {
             has_emoji_presentation = true;
         }
-        if extended_pictographic.contains(c) {
+        if classifier.extended_pictographic.contains(c) {
             has_extended_pictographic = true;
         }
-        if emoji.contains(c) {
+        if classifier.emoji.contains(c) {
             has_emoji = true;
         }
         match c {
@@ -506,41 +946,73 @@ fn is_newline_grapheme(g: &str) -> bool {
     matches!(g, "\n" | "\r" | "\r\n")
 }
 
-fn aggregate_changes(stats: &CleaningStats) -> usize {
-    stats.hidden_chars_removed
-        + stats.trailing_whitespace_removed
-        + stats.spaces_normalized
-        + stats.dashes_normalized
-        + stats.quotes_normalized
-        + stats.other_normalized
-        + stats.control_chars_removed
-        + stats.line_endings_normalized
-        + stats.non_keyboard_removed
-        + stats.emojis_dropped
+#[derive(Debug, Default, Clone, Copy)]
+struct LineEndingCounts {
+    crlf: u64,
+    cr: u64,
+    nel: u64,
+    ls: u64,
+    ps: u64,
+}
+
+impl LineEndingCounts {
+    fn total(&self) -> u64 {
+        self.crlf + self.cr + self.nel + self.ls + self.ps
+    }
 }
 
 // ----------------- helpers -----------------
 
-fn to_lf(s: &str) -> (String, usize) {
-    // Convert CRLF, CR and NEL (U+0085) to LF and count conversions.
+fn to_lf(s: &str) -> (String, LineEndingCounts) {
+    // Convert CRLF, CR, NEL (U+0085), LS (U+2028) and PS (U+2029) to LF and track conversions.
     let mut out = String::with_capacity(s.len());
-    let mut changed = 0usize;
+    let mut counts = LineEndingCounts::default();
     let mut it = s.chars().peekable();
     while let Some(c) = it.next() {
         if c == '\r' {
             if matches!(it.peek(), Some('\n')) {
                 it.next(); // consume LF
+                counts.crlf = counts.crlf.saturating_add(1);
+            } else {
+                counts.cr = counts.cr.saturating_add(1);
             }
             out.push('\n');
-            changed += 1;
         } else if c == '\u{0085}' {
             out.push('\n');
-            changed += 1;
+            counts.nel = counts.nel.saturating_add(1);
+        } else if c == '\u{2028}' {
+            out.push('\n');
+            counts.ls = counts.ls.saturating_add(1);
+        } else if c == '\u{2029}' {
+            out.push('\n');
+            counts.ps = counts.ps.saturating_add(1);
         } else {
             out.push(c);
         }
     }
-    (out, changed)
+    (out, counts)
+}
+
+fn restamp_line_endings_mut(style: LineEndingStyle, text: &mut String) -> u64 {
+    match style {
+        LineEndingStyle::Lf => 0,
+        LineEndingStyle::Crlf => {
+            let lf_count = text.as_bytes().iter().filter(|&&b| b == b'\n').count() as u64;
+            if lf_count > 0 {
+                let restamped = text.replace('\n', "\r\n");
+                *text = restamped;
+            }
+            lf_count
+        }
+        LineEndingStyle::Cr => {
+            let lf_count = text.as_bytes().iter().filter(|&&b| b == b'\n').count() as u64;
+            if lf_count > 0 {
+                let restamped = text.replace('\n', "\r");
+                *text = restamped;
+            }
+            lf_count
+        }
+    }
 }
 
 fn map_dash(c: char) -> Option<char> {
@@ -552,12 +1024,12 @@ fn map_quote(c: char) -> Option<char> {
 }
 
 /// Convenience: clean with default options.
-pub fn clean(text: &str) -> CleaningResult {
+pub fn clean(text: &str) -> CleaningResult<'_> {
     TextCleaner::new(CleaningOptions::default()).clean(text)
 }
 
 /// Convenience: clean with the humanize preset.
-pub fn humanize(text: &str) -> CleaningResult {
+pub fn humanize(text: &str) -> CleaningResult<'_> {
     TextCleaner::new(CleaningOptions::humanize()).clean(text)
 }
 
@@ -640,14 +1112,35 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_unicode_line_separators() {
+        let mut options = CleaningOptions::minimal();
+        options.normalize_line_endings = Some(LineEndingStyle::Lf);
+        let c = TextCleaner::new(options);
+        let out = c.clean("a\u{2028}b\u{2029}c");
+        assert_eq!(out.text, "a\nb\nc");
+        assert_eq!(out.stats.line_endings_normalized, 2);
+    }
+
+    #[test]
+    fn restamping_counts_changes() {
+        let mut options = CleaningOptions::minimal();
+        options.normalize_line_endings = Some(LineEndingStyle::Crlf);
+        let c = TextCleaner::new(options);
+        let out = c.clean("a\nb\n");
+        assert_eq!(out.text, "a\r\nb\r\n");
+        assert_eq!(out.stats.line_endings_normalized, 2);
+    }
+
+    #[test]
     fn default_cleaning_matches_keyboard_equivalent() {
         let out = clean("“Hello—world…”\u{00A0}😀");
-        assert_eq!(out.text, "\"Hello-world...\" 😀");
+        assert_eq!(out.text, "\"Hello-world...\"");
         assert_eq!(out.stats.quotes_normalized, 2);
         assert_eq!(out.stats.dashes_normalized, 1);
         assert_eq!(out.stats.other_normalized, 1);
         assert_eq!(out.stats.spaces_normalized, 1);
-        assert_eq!(out.changes_made, 5);
+        assert_eq!(out.stats.emojis_dropped, 1);
+        assert_eq!(out.changes_made, 7);
     }
 
     #[test]
@@ -681,6 +1174,7 @@ mod tests {
 
         let cleaner = TextCleaner::new(CleaningOptions {
             remove_hidden: false,
+            keyboard_only: false,
             ..CleaningOptions::default()
         });
         let out = cleaner.clean(input);
@@ -689,6 +1183,7 @@ mod tests {
 
         let cleaner = TextCleaner::new(CleaningOptions {
             normalize_spaces: false,
+            keyboard_only: false,
             ..CleaningOptions::default()
         });
         let out = cleaner.clean(input);
@@ -696,13 +1191,31 @@ mod tests {
         assert_eq!(out.changes_made, 3);
     }
 
+    #[cfg(feature = "security")]
+    #[test]
+    fn strips_bidi_controls_when_enabled() {
+        let options = CleaningOptions {
+            strip_bidi_controls: true,
+            ..CleaningOptions::default()
+        };
+        let cleaner = TextCleaner::new(options);
+        let out = cleaner.clean("\u{202E}ab\u{202C}c");
+        assert_eq!(out.text, "abc");
+        assert!(out.changes_made >= 2);
+        #[cfg(feature = "stats")]
+        {
+            assert!(out.stats.bidi_controls_removed >= 2);
+        }
+    }
+
     #[test]
     fn ts_dashes_case() {
         let cleaner = TextCleaner::new(CleaningOptions::default());
         let out = cleaner.clean("I — super — man – 💪");
-        assert_eq!(out.text, "I - super - man - 💪");
+        assert_eq!(out.text, "I - super - man -");
         assert_eq!(out.stats.dashes_normalized, 3);
-        assert_eq!(out.changes_made, 3);
+        assert_eq!(out.stats.emojis_dropped, 1);
+        assert_eq!(out.changes_made, 5);
     }
 
     #[test]
@@ -773,7 +1286,10 @@ mod tests {
 
     #[test]
     fn keeps_variation_selector_for_emoji() {
-        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let cleaner = TextCleaner::new(CleaningOptions {
+            keyboard_only: false,
+            ..CleaningOptions::default()
+        });
         let out = cleaner.clean("👍\u{FE0F}");
         assert_eq!(out.text, "👍\u{FE0F}");
         assert_eq!(out.stats.hidden_chars_removed, 0);

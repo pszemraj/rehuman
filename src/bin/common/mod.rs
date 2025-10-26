@@ -8,8 +8,8 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use rehuman::{
-    CleaningOptions, CleaningResult, CleaningStats, EmojiPolicy, LineEndingStyle, TextCleaner,
-    UnicodeNormalizationMode,
+    CleaningOptions, CleaningResult, CleaningStats, EmojiPolicy, LineEndingStyle, StreamCleaner,
+    TextCleaner, UnicodeNormalizationMode,
 };
 
 pub const MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
@@ -119,6 +119,8 @@ pub struct PartialOptions {
     pub collapse_whitespace: Option<bool>,
     pub line_endings: Option<LineEndingChoice>,
     pub unicode_normalization: Option<UnicodeNormalizationChoice>,
+    #[cfg(feature = "security")]
+    pub strip_bidi_controls: Option<bool>,
 }
 
 impl PartialOptions {
@@ -159,6 +161,10 @@ impl PartialOptions {
         if let Some(choice) = self.unicode_normalization {
             options.unicode_normalization = choice.into();
         }
+        #[cfg(feature = "security")]
+        if let Some(val) = self.strip_bidi_controls {
+            options.strip_bidi_controls = val;
+        }
     }
 }
 
@@ -177,6 +183,8 @@ pub struct SerializableOptions {
     pub collapse_whitespace: bool,
     pub line_endings: LineEndingChoice,
     pub unicode_normalization: UnicodeNormalizationChoice,
+    #[cfg(feature = "security")]
+    pub strip_bidi_controls: bool,
 }
 
 impl Default for SerializableOptions {
@@ -187,20 +195,22 @@ impl Default for SerializableOptions {
 
 impl SerializableOptions {
     pub fn to_cleaning_options(&self) -> CleaningOptions {
-        CleaningOptions {
-            remove_hidden: self.remove_hidden,
-            remove_trailing_whitespace: self.remove_trailing_whitespace,
-            normalize_spaces: self.normalize_spaces,
-            normalize_dashes: self.normalize_dashes,
-            normalize_quotes: self.normalize_quotes,
-            normalize_other: self.normalize_other,
-            keyboard_only: self.keyboard_only,
-            emoji_policy: self.emoji_policy.into(),
-            remove_control_chars: self.remove_control_chars,
-            collapse_whitespace: self.collapse_whitespace,
-            normalize_line_endings: self.line_endings.into_option(),
-            unicode_normalization: self.unicode_normalization.into(),
-        }
+        let builder = CleaningOptions::builder()
+            .remove_hidden(self.remove_hidden)
+            .remove_trailing_whitespace(self.remove_trailing_whitespace)
+            .normalize_spaces(self.normalize_spaces)
+            .normalize_dashes(self.normalize_dashes)
+            .normalize_quotes(self.normalize_quotes)
+            .normalize_other(self.normalize_other)
+            .keyboard_only(self.keyboard_only)
+            .emoji_policy(self.emoji_policy.into())
+            .remove_control_chars(self.remove_control_chars)
+            .collapse_whitespace(self.collapse_whitespace)
+            .normalize_line_endings(self.line_endings.into_option())
+            .unicode_normalization(self.unicode_normalization.into());
+        #[cfg(feature = "security")]
+        let builder = builder.strip_bidi_controls(self.strip_bidi_controls);
+        builder.build()
     }
 
     pub fn from_cleaning_options(options: &CleaningOptions) -> Self {
@@ -217,6 +227,8 @@ impl SerializableOptions {
             collapse_whitespace: options.collapse_whitespace,
             line_endings: options.normalize_line_endings.into(),
             unicode_normalization: options.unicode_normalization.into(),
+            #[cfg(feature = "security")]
+            strip_bidi_controls: options.strip_bidi_controls,
         }
     }
 }
@@ -238,11 +250,10 @@ impl Default for ConfigFile {
 }
 
 pub fn default_cli_options() -> CleaningOptions {
-    CleaningOptions {
-        keyboard_only: true,
-        emoji_policy: EmojiPolicy::Drop,
-        ..CleaningOptions::default()
-    }
+    CleaningOptions::builder()
+        .keyboard_only(true)
+        .emoji_policy(EmojiPolicy::Drop)
+        .build()
 }
 
 pub fn default_config_path() -> Option<PathBuf> {
@@ -312,7 +323,7 @@ pub fn read_input(input_path: Option<&Path>, max_bytes: usize) -> Result<String>
 }
 
 #[allow(dead_code)]
-pub fn write_output(result: &CleaningResult) -> Result<()> {
+pub fn write_output(result: &CleaningResult<'_>) -> Result<()> {
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(result.text.as_bytes())
@@ -320,7 +331,7 @@ pub fn write_output(result: &CleaningResult) -> Result<()> {
     Ok(())
 }
 
-pub fn write_stats(result: &CleaningResult) {
+pub fn write_stats(result: &CleaningResult<'_>) {
     let stats = &result.stats;
     eprintln!("changes_made: {}", result.changes_made);
     eprintln!("  hidden_chars_removed: {}", stats.hidden_chars_removed);
@@ -353,13 +364,13 @@ pub fn parse_bool_flag(value: &str) -> std::result::Result<bool, String> {
 #[derive(Debug)]
 pub struct StreamOutcome {
     pub stats: CleaningStats,
-    pub changes_made: usize,
+    pub changes_made: u64,
 }
 
 #[derive(Serialize)]
 pub struct StatsSummary<'a> {
     pub changed: bool,
-    pub changes_made: usize,
+    pub changes_made: u64,
     pub stats: &'a CleaningStats,
 }
 
@@ -373,9 +384,9 @@ where
     R: BufRead,
     W: Write,
 {
-    let mut aggregate = CleaningStats::default();
-    let mut changes_made = 0usize;
+    let mut stream = StreamCleaner::new(cleaner.options().clone());
     let mut buffer = String::new();
+    let mut chunk_output = String::new();
 
     loop {
         buffer.clear();
@@ -385,19 +396,27 @@ where
         if bytes_read == 0 {
             break;
         }
-        let result = cleaner.clean(&buffer);
+        if let Some(result) = stream.feed(&buffer, &mut chunk_output) {
+            writer
+                .write_all(result.text.as_bytes())
+                .context("failed to write stream chunk")?;
+            chunk_output.clear();
+        }
+    }
+
+    if let Some(result) = stream.finish(&mut chunk_output) {
         writer
             .write_all(result.text.as_bytes())
             .context("failed to write stream chunk")?;
-        aggregate.accumulate(&result.stats);
-        changes_made += result.changes_made;
+        chunk_output.clear();
     }
 
     writer.flush().context("failed to flush output stream")?;
 
+    let summary = stream.summary();
     Ok(StreamOutcome {
-        stats: aggregate,
-        changes_made,
+        stats: summary.stats,
+        changes_made: summary.changes_made,
     })
 }
 
@@ -406,4 +425,19 @@ pub fn write_stats_json<W: Write>(writer: &mut W, summary: &StatsSummary) -> Res
         .context("failed to serialize JSON stats")?;
     writer.write_all(b"\n").ok();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_defaults_match_library_defaults() {
+        let cli_defaults = default_cli_options();
+        let library_defaults = CleaningOptions::default();
+        assert_eq!(
+            cli_defaults, library_defaults,
+            "CLI default options should mirror library defaults"
+        );
+    }
 }

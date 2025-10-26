@@ -1,5 +1,7 @@
 # Examples
 
+The default cleaner (and CLI) enforces keyboard-only ASCII output, so emoji are removed unless you explicitly relax `keyboard_only` or switch the emoji policy.
+
 ## Web Scraping Cleanup
 
 ```rust
