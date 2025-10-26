@@ -1,5 +1,6 @@
 mod common;
 
+use std::borrow::Cow;
 use std::fs;
 use std::io::{self, BufReader, BufWriter, IsTerminal};
 use std::path::{Path, PathBuf};
@@ -141,7 +142,7 @@ fn main() -> Result<()> {
 
     if cli.stats {
         let stats_result = CleaningResult {
-            text: String::new(),
+            text: Cow::Owned(String::new()),
             changes_made,
             stats: aggregate_stats.clone(),
         };

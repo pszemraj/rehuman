@@ -81,8 +81,8 @@ println!("dashes normalized: {}", result.stats.dashes_normalized);
 `TextCleaner::clean` returns a `CleaningResult`:
 
 ```rust
-pub struct CleaningResult {
-    pub text: String,
+pub struct CleaningResult<'a> {
+    pub text: std::borrow::Cow<'a, str>,
     pub changes_made: u64,
     pub stats: CleaningStats,
 }
@@ -107,15 +107,19 @@ pub struct CleaningStats {
 
 Use these metrics for monitoring, debugging, or reporting.
 
+## Reusing Buffers
+
+For allocation-sensitive paths, call `TextCleaner::clean_into(input, &mut buffer)` to reuse an existing `String`. The function fills the provided buffer with the cleaned text and returns a `CleaningResult` whose `text` borrows from that buffer.
+
 ## Feature Flags
 
 | Flag     | Default | Description                                                                                                                |
 | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `unorm`  | enabled | Enables Unicode normalization support via the `unicode-normalization` crate. Disable if you want to avoid that dependency. |
+| `unorm`  | enabled | Enables Unicode normalization support via the `unicode-normalization` crate. If disabled, requesting normalization will panic at runtime. |
 | `stats`  | enabled | Collects per-change counters in the hot path. Disable to skip tracking overhead while keeping change detection accurate.   |
 
 ## Error Handling
 
-- The library operates on `&str` and returns owned `String` outputs.
+- The library operates on `&str` and returns a `CleaningResult` whose text is a `Cow<'_, str>` (borrowed when no changes are needed, owned otherwise).
 - `TextCleaner::clean` never fails; it always produces a `CleaningResult`.
 - CLI helpers surface errors through `anyhow::Result` for ergonomic error messages.

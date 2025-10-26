@@ -312,7 +312,7 @@ pub fn read_input(input_path: Option<&Path>, max_bytes: usize) -> Result<String>
 }
 
 #[allow(dead_code)]
-pub fn write_output(result: &CleaningResult) -> Result<()> {
+pub fn write_output(result: &CleaningResult<'_>) -> Result<()> {
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(result.text.as_bytes())
@@ -320,7 +320,7 @@ pub fn write_output(result: &CleaningResult) -> Result<()> {
     Ok(())
 }
 
-pub fn write_stats(result: &CleaningResult) {
+pub fn write_stats(result: &CleaningResult<'_>) {
     let stats = &result.stats;
     eprintln!("changes_made: {}", result.changes_made);
     eprintln!("  hidden_chars_removed: {}", stats.hidden_chars_removed);

@@ -1,10 +1,10 @@
 //! rehuman — Unicode‑safe text cleaning & typographic normalization.
 
-#[cfg(feature = "unorm")]
-use unicode_normalization::UnicodeNormalization;
-
 use icu_properties::sets as icu_sets;
 use serde::Serialize;
+use std::borrow::Cow;
+#[cfg(feature = "unorm")]
+use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 
 mod generated;
@@ -58,8 +58,8 @@ pub struct CleaningStats {
 
 /// Result of a text cleaning operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct CleaningResult {
-    pub text: String,
+pub struct CleaningResult<'a> {
+    pub text: Cow<'a, str>,
     pub changes_made: u64,
     pub stats: CleaningStats,
 }
@@ -225,37 +225,81 @@ impl TextCleaner {
         Self { options }
     }
 
-    pub fn clean(&self, text: &str) -> CleaningResult {
-        let mut stats = CleaningStats::default();
-        let mut changes = 0u64;
-
+    pub fn clean<'a>(&self, text: &'a str) -> CleaningResult<'a> {
         if text.is_empty() {
             return CleaningResult {
-                text: String::new(),
+                text: Cow::Borrowed(text),
                 changes_made: 0,
-                stats,
+                stats: CleaningStats::default(),
             };
         }
 
         if self.can_use_ascii_fast_path(text) {
             return CleaningResult {
-                text: text.to_owned(),
+                text: Cow::Borrowed(text),
                 changes_made: 0,
-                stats,
+                stats: CleaningStats::default(),
             };
         }
+
+        let mut buffer = String::with_capacity(text.len());
+        let (changes, stats) = self.clean_into_internal(text, &mut buffer);
+        CleaningResult {
+            text: Cow::Owned(buffer),
+            changes_made: changes,
+            stats,
+        }
+    }
+
+    pub fn clean_into<'output>(
+        &self,
+        text: &str,
+        out: &'output mut String,
+    ) -> CleaningResult<'output> {
+        out.clear();
+
+        if text.is_empty() {
+            return CleaningResult {
+                text: Cow::Borrowed(out.as_str()),
+                changes_made: 0,
+                stats: CleaningStats::default(),
+            };
+        }
+
+        if self.can_use_ascii_fast_path(text) {
+            out.push_str(text);
+            return CleaningResult {
+                text: Cow::Borrowed(out.as_str()),
+                changes_made: 0,
+                stats: CleaningStats::default(),
+            };
+        }
+
+        let (changes, stats) = self.clean_into_internal(text, out);
+        CleaningResult {
+            text: Cow::Borrowed(out.as_str()),
+            changes_made: changes,
+            stats,
+        }
+    }
+
+    fn clean_into_internal(&self, text: &str, out: &mut String) -> (u64, CleaningStats) {
+        let mut stats = CleaningStats::default();
+        let mut changes = 0u64;
 
         let mut working = self.apply_unicode_normalization(text);
 
         if self.options.normalize_line_endings.is_some() {
-            let (lf, changed) = to_lf(&working);
-            working = lf;
+            let (lf, changed) = to_lf(working.as_ref());
+            working = Cow::Owned(lf);
             if changed > 0 {
                 record_change!(changes, stats, line_endings_normalized, changed);
             }
         }
 
-        let mut out = String::with_capacity(working.len());
+        out.clear();
+        out.reserve(working.len());
+
         let mut pending_ws: usize = 0;
         let trim = self.options.remove_trailing_whitespace;
         let collapse = self.options.collapse_whitespace;
@@ -267,7 +311,7 @@ impl TextCleaner {
         };
         let default_ignorables = icu_sets::default_ignorable_code_point();
 
-        for grapheme in UnicodeSegmentation::graphemes(working.as_str(), true) {
+        for grapheme in UnicodeSegmentation::graphemes(working.as_ref(), true) {
             if grapheme.is_empty() {
                 continue;
             }
@@ -279,7 +323,7 @@ impl TextCleaner {
                         pending_ws = 0;
                     }
                 } else {
-                    flush_pending_whitespace(&mut out, pending_ws, collapse);
+                    flush_pending_whitespace(out, pending_ws, collapse);
                     pending_ws = 0;
                 }
                 out.push_str(grapheme);
@@ -353,7 +397,7 @@ impl TextCleaner {
                             record_change!(changes, stats, other_normalized);
                         }
                         HORIZONTAL_ELLIPSIS | MIDLINE_HORIZONTAL_ELLIPSIS => {
-                            flush_pending_whitespace(&mut out, pending_ws, collapse);
+                            flush_pending_whitespace(out, pending_ws, collapse);
                             pending_ws = 0;
                             out.push_str("...");
                             record_change!(changes, stats, other_normalized);
@@ -381,7 +425,7 @@ impl TextCleaner {
             }
 
             if pending_ws > 0 {
-                flush_pending_whitespace(&mut out, pending_ws, collapse);
+                flush_pending_whitespace(out, pending_ws, collapse);
                 pending_ws = 0;
             }
 
@@ -409,38 +453,35 @@ impl TextCleaner {
                 record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
             }
         } else {
-            flush_pending_whitespace(&mut out, pending_ws, collapse);
+            flush_pending_whitespace(out, pending_ws, collapse);
         }
 
-        let mut text = out;
         if let Some(style) = self.options.normalize_line_endings {
-            text = match style {
-                LineEndingStyle::Lf => text,
-                LineEndingStyle::Crlf => text.replace('\n', "\r\n"),
-                LineEndingStyle::Cr => text.replace('\n', "\r"),
-            };
+            let restamp_changes = restamp_line_endings_mut(style, out);
+            if restamp_changes > 0 {
+                record_change!(changes, stats, line_endings_normalized, restamp_changes);
+            }
         }
 
-        CleaningResult {
-            text,
-            changes_made: changes,
-            stats,
-        }
+        (changes, stats)
     }
 
-    fn apply_unicode_normalization(&self, text: &str) -> String {
+    fn apply_unicode_normalization<'a>(&self, text: &'a str) -> Cow<'a, str> {
         match self.options.unicode_normalization {
-            UnicodeNormalizationMode::None => text.to_owned(),
+            UnicodeNormalizationMode::None => Cow::Borrowed(text),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFD => text.nfd().collect(),
+            UnicodeNormalizationMode::NFD => Cow::Owned(text.nfd().collect()),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFC => text.nfc().collect(),
+            UnicodeNormalizationMode::NFC => Cow::Owned(text.nfc().collect()),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFKD => text.nfkd().collect(),
+            UnicodeNormalizationMode::NFKD => Cow::Owned(text.nfkd().collect()),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFKC => text.nfkc().collect(),
+            UnicodeNormalizationMode::NFKC => Cow::Owned(text.nfkc().collect()),
             #[cfg(not(feature = "unorm"))]
-            _ => text.to_owned(),
+            mode => panic!(
+                "Unicode normalization mode {:?} requested but the 'unorm' feature is disabled",
+                mode
+            ),
         }
     }
 
@@ -536,7 +577,7 @@ fn is_newline_grapheme(g: &str) -> bool {
 // ----------------- helpers -----------------
 
 fn to_lf(s: &str) -> (String, u64) {
-    // Convert CRLF, CR and NEL (U+0085) to LF and count conversions.
+    // Convert CRLF, CR, NEL (U+0085), LS (U+2028) and PS (U+2029) to LF and count conversions.
     let mut out = String::with_capacity(s.len());
     let mut changed = 0u64;
     let mut it = s.chars().peekable();
@@ -547,7 +588,7 @@ fn to_lf(s: &str) -> (String, u64) {
             }
             out.push('\n');
             changed = changed.saturating_add(1);
-        } else if c == '\u{0085}' {
+        } else if matches!(c, '\u{0085}' | '\u{2028}' | '\u{2029}') {
             out.push('\n');
             changed = changed.saturating_add(1);
         } else {
@@ -555,6 +596,28 @@ fn to_lf(s: &str) -> (String, u64) {
         }
     }
     (out, changed)
+}
+
+fn restamp_line_endings_mut(style: LineEndingStyle, text: &mut String) -> u64 {
+    match style {
+        LineEndingStyle::Lf => 0,
+        LineEndingStyle::Crlf => {
+            let lf_count = text.as_bytes().iter().filter(|&&b| b == b'\n').count() as u64;
+            if lf_count > 0 {
+                let restamped = text.replace('\n', "\r\n");
+                *text = restamped;
+            }
+            lf_count
+        }
+        LineEndingStyle::Cr => {
+            let lf_count = text.as_bytes().iter().filter(|&&b| b == b'\n').count() as u64;
+            if lf_count > 0 {
+                let restamped = text.replace('\n', "\r");
+                *text = restamped;
+            }
+            lf_count
+        }
+    }
 }
 
 fn map_dash(c: char) -> Option<char> {
@@ -566,12 +629,12 @@ fn map_quote(c: char) -> Option<char> {
 }
 
 /// Convenience: clean with default options.
-pub fn clean(text: &str) -> CleaningResult {
+pub fn clean(text: &str) -> CleaningResult<'_> {
     TextCleaner::new(CleaningOptions::default()).clean(text)
 }
 
 /// Convenience: clean with the humanize preset.
-pub fn humanize(text: &str) -> CleaningResult {
+pub fn humanize(text: &str) -> CleaningResult<'_> {
     TextCleaner::new(CleaningOptions::humanize()).clean(text)
 }
 
@@ -651,6 +714,26 @@ mod tests {
         let out = c.clean("a\r\nb\rc\u{0085}");
         assert_eq!(out.text, "a\nb\nc\n");
         assert!(out.stats.line_endings_normalized >= 3);
+    }
+
+    #[test]
+    fn normalizes_unicode_line_separators() {
+        let mut options = CleaningOptions::minimal();
+        options.normalize_line_endings = Some(LineEndingStyle::Lf);
+        let c = TextCleaner::new(options);
+        let out = c.clean("a\u{2028}b\u{2029}c");
+        assert_eq!(out.text, "a\nb\nc");
+        assert_eq!(out.stats.line_endings_normalized, 2);
+    }
+
+    #[test]
+    fn restamping_counts_changes() {
+        let mut options = CleaningOptions::minimal();
+        options.normalize_line_endings = Some(LineEndingStyle::Crlf);
+        let c = TextCleaner::new(options);
+        let out = c.clean("a\nb\n");
+        assert_eq!(out.text, "a\r\nb\r\n");
+        assert_eq!(out.stats.line_endings_normalized, 2);
     }
 
     #[test]

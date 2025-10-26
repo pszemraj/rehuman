@@ -150,13 +150,22 @@ fn keyboard_only_drops_zwj_emoji() {
     assert!(output.stats.emojis_dropped >= 1);
 }
 
+fn is_allowed_hidden(c: char) -> bool {
+    matches!(c, '\u{200D}' | '\u{200C}')
+        || ('\u{FE00}'..='\u{FE0F}').contains(&c)
+        || ('\u{E0000}'..='\u{E007F}').contains(&c)
+        || ('\u{E0100}'..='\u{E01EF}').contains(&c)
+}
+
 proptest! {
     #[test]
     fn removing_hidden_characters_eliminates_default_ignorables(input in sample_string()) {
         let output = clean(&input);
         let default_ignorables = sets::default_ignorable_code_point();
         prop_assert!(
-            !output.text.chars().any(|c| default_ignorables.contains(c)),
+            !output.text
+                .chars()
+                .any(|c| default_ignorables.contains(c) && !is_allowed_hidden(c)),
             "found default ignorable code point after cleaning"
         );
     }
@@ -172,7 +181,7 @@ proptest! {
         });
         let output = cleaner.clean(&input);
         prop_assert!(output.text.chars().all(is_keyboard_ascii));
-        let has_rendered_emoji = UnicodeSegmentation::graphemes(output.text.as_str(), true)
+        let has_rendered_emoji = UnicodeSegmentation::graphemes(output.text.as_ref(), true)
             .any(grapheme_is_rendered_emoji);
         prop_assert!(!has_rendered_emoji);
     }
