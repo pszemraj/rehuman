@@ -426,3 +426,18 @@ pub fn write_stats_json<W: Write>(writer: &mut W, summary: &StatsSummary) -> Res
     writer.write_all(b"\n").ok();
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_defaults_match_library_defaults() {
+        let cli_defaults = default_cli_options();
+        let library_defaults = CleaningOptions::default();
+        assert_eq!(
+            cli_defaults, library_defaults,
+            "CLI default options should mirror library defaults"
+        );
+    }
+}

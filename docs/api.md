@@ -24,7 +24,7 @@ let basic = clean("Hi\u{200B}there");             // -> "Hi there"
 let fancy = humanize("“Quote”—and…more");         // -> "\"Quote\"-and...more"
 ```
 
-- `clean` applies the default preset (hidden character removal, spacing fixes).
+- `clean` applies the default preset (hidden character removal, spacing fixes) and emits keyboard-safe ASCII (emoji are dropped unless you opt out).
 - `humanize` applies the "humanize" preset (default preset + typographic normalization + whitespace collapsing).
 
 ## TextCleaner
@@ -48,7 +48,7 @@ let options = CleaningOptions::builder()
     .collapse_whitespace(true)
     .normalize_line_endings(Some(rehuman::LineEndingStyle::Lf))
     // Keyboard enforcement
-    .keyboard_only(true)
+    .keyboard_only(true) // true by default
     .emoji_policy(EmojiPolicy::Drop)
     .build();
 
@@ -60,6 +60,8 @@ let result = cleaner
 assert_eq!(result.text, "\"Hello-world...\"");
 println!("dashes normalized: {}", result.stats.dashes_normalized);
 ```
+
+> Both the Rust API (`clean`) and the `rehuman` CLI share the same defaults: keyboard-only output with emoji removed so the result stays ASCII-safe.
 
 ### CleaningOptions Fields
 

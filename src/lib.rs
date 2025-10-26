@@ -159,7 +159,7 @@ macro_rules! record_change {
 }
 
 /// Configuration for cleaning.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CleaningOptions {
     pub remove_hidden: bool,
     pub remove_trailing_whitespace: bool,
@@ -474,6 +474,9 @@ impl TextCleaner {
         out.reserve(working.len());
 
         let mut pending_ws: usize = 0;
+        let mut cap_next_whitespace = false;
+        let mut drop_leading_whitespace = false;
+        let mut emitted_anything = false;
         let trim = self.options.remove_trailing_whitespace;
         let collapse = self.options.collapse_whitespace;
 
@@ -498,12 +501,16 @@ impl TextCleaner {
                     if pending_ws > 0 {
                         record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
                         pending_ws = 0;
+                        cap_next_whitespace = false;
                     }
                 } else {
                     flush_pending_whitespace(out, pending_ws, collapse);
                     pending_ws = 0;
+                    cap_next_whitespace = false;
                 }
                 out.push_str(grapheme);
+                emitted_anything = true;
+                drop_leading_whitespace = false;
                 continue;
             }
 
@@ -589,9 +596,17 @@ impl TextCleaner {
                             record_change!(changes, stats, other_normalized);
                         }
                         HORIZONTAL_ELLIPSIS | MIDLINE_HORIZONTAL_ELLIPSIS => {
-                            flush_pending_whitespace(out, pending_ws, collapse);
-                            pending_ws = 0;
+                            if pending_ws > 0 {
+                                if drop_leading_whitespace && !emitted_anything {
+                                    pending_ws = 0;
+                                } else {
+                                    flush_pending_whitespace(out, pending_ws, collapse);
+                                    pending_ws = 0;
+                                }
+                            }
                             out.push_str("...");
+                            emitted_anything = true;
+                            drop_leading_whitespace = false;
                             record_change!(changes, stats, other_normalized);
                             emitted_directly = true;
                             break;
@@ -612,7 +627,13 @@ impl TextCleaner {
             }
 
             if cluster_buffer.chars().all(|ch| matches!(ch, ' ' | '\t')) {
-                pending_ws += cluster_buffer.chars().count();
+                let count = cluster_buffer.chars().count();
+                if cap_next_whitespace {
+                    pending_ws = 1;
+                    cap_next_whitespace = false;
+                } else {
+                    pending_ws = pending_ws.saturating_add(count);
+                }
                 continue;
             }
 
@@ -624,26 +645,48 @@ impl TextCleaner {
 
                 if keep_cluster {
                     if pending_ws > 0 {
-                        flush_pending_whitespace(out, pending_ws, collapse);
-                        pending_ws = 0;
+                        if drop_leading_whitespace && !emitted_anything {
+                            pending_ws = 0;
+                        } else {
+                            flush_pending_whitespace(out, pending_ws, collapse);
+                            pending_ws = 0;
+                        }
                     }
                     out.push_str(&cluster_buffer);
+                    emitted_anything = true;
+                    drop_leading_whitespace = false;
                 } else if is_emoji_cluster {
                     record_change!(changes, stats, emojis_dropped);
                     cluster_buffer.clear();
+                    cap_next_whitespace = true;
+                    drop_leading_whitespace = pending_ws == 0 && !emitted_anything;
+                    if pending_ws > 0 {
+                        pending_ws = 1;
+                    }
                 } else {
                     let removed = cluster_buffer.chars().count();
                     if removed > 0 {
                         record_change!(changes, stats, non_keyboard_removed, removed);
                     }
                     cluster_buffer.clear();
+                    cap_next_whitespace = true;
+                    drop_leading_whitespace = pending_ws == 0 && !emitted_anything;
+                    if pending_ws > 0 {
+                        pending_ws = 1;
+                    }
                 }
             } else {
                 if pending_ws > 0 {
-                    flush_pending_whitespace(out, pending_ws, collapse);
-                    pending_ws = 0;
+                    if drop_leading_whitespace && !emitted_anything {
+                        pending_ws = 0;
+                    } else {
+                        flush_pending_whitespace(out, pending_ws, collapse);
+                        pending_ws = 0;
+                    }
                 }
                 out.push_str(&cluster_buffer);
+                emitted_anything = true;
+                drop_leading_whitespace = false;
             }
         }
 
@@ -651,8 +694,12 @@ impl TextCleaner {
             if pending_ws > 0 {
                 record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
             }
-        } else {
-            flush_pending_whitespace(out, pending_ws, collapse);
+        } else if pending_ws > 0 {
+            if drop_leading_whitespace && !emitted_anything {
+                // drop leading whitespace that only existed due to removed clusters
+            } else {
+                flush_pending_whitespace(out, pending_ws, collapse);
+            }
         }
 
         if let Some(style) = self.options.normalize_line_endings {
