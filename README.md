@@ -43,6 +43,15 @@ let a = clean("Hi\u{200B}there");             // default preset
 let b = humanize("“Quote”—and…more");          // humanize preset
 ```
 
+## CLI
+
+This crate ships a `rehuman` command-line tool for quick one-off normalization.
+
+- `rehuman notes.txt` cleans a file (up to 5 MB) and prints the result to stdout. Redirect if you want to save: `rehuman notes.txt > notes.clean.txt`.
+- Pipe data the same way: `curl https://example.com | rehuman --stats`.
+- Default CLI behavior enforces keyboard-only output and drops emoji. Override with flags such as `--keep-emoji`, `--keyboard-only=false`, `--unicode-normalization nfkc`, or `--line-endings crlf`.
+- Set custom defaults by passing `--save-config`; the resolved options are stored under the platform config dir (e.g. `~/.config/rehuman/config.toml`). Use `--config <path>` to point at an alternative file.
+
 ## Feature flags
 
 - `unorm` *(default)* – uses `unicode-normalization` for NFC/NFD/NFKC/NFKD.
