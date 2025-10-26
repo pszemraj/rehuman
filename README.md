@@ -60,6 +60,8 @@ Two binaries ship with the crate:
 - `ishuman` checks whether text would change. It prints `1` when no normalization is needed and `0` otherwise.
   - `ishuman notes.txt` uses the same config/flags as `rehuman`. Add `--stats` for a breakdown (stderr) or `--exit-code` to surface the verdict via the process status.
 
+Unicode tables are generated during `cargo build` from the official Unicode Character Database, so the binaries remain self-contained—no runtime downloads needed.
+
 ## Feature flags
 
 - `unorm` *(default)* - uses `unicode-normalization` for NFC/NFD/NFKC/NFKD.

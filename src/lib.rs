@@ -3,8 +3,16 @@
 #[cfg(feature = "unorm")]
 use unicode_normalization::UnicodeNormalization;
 
+use icu_properties::sets as icu_sets;
+
+mod generated;
 mod sets;
+use generated::{DASH_MAP, QUOTE_MAP, SPACE_MAP};
 pub use sets::{is_emoji, is_hidden_char, is_keyboard_ascii};
+
+const FRACTION_SLASH: char = '\u{2044}';
+const HORIZONTAL_ELLIPSIS: char = '\u{2026}';
+const MIDLINE_HORIZONTAL_ELLIPSIS: char = '\u{22EF}';
 
 /// Unicode normalization modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,8 +167,192 @@ impl TextCleaner {
     pub fn clean(&self, text: &str) -> CleaningResult {
         let mut stats = CleaningStats::default();
 
-        // 1) Unicode Normalization (if enabled)
-        let mut input = match self.options.unicode_normalization {
+        if text.is_empty() {
+            return CleaningResult {
+                text: String::new(),
+                changes_made: 0,
+                stats,
+            };
+        }
+
+        if self.can_use_ascii_fast_path(text) {
+            return CleaningResult {
+                text: text.to_owned(),
+                changes_made: 0,
+                stats,
+            };
+        }
+
+        let mut working = self.apply_unicode_normalization(text);
+
+        if self.options.normalize_line_endings.is_some() {
+            let (lf, changed) = to_lf(&working);
+            working = lf;
+            stats.line_endings_normalized += changed;
+        }
+
+        let mut out = String::with_capacity(working.len());
+        let mut pending_ws: usize = 0;
+        let trim = self.options.remove_trailing_whitespace;
+        let collapse = self.options.collapse_whitespace;
+
+        let default_ignorables = icu_sets::default_ignorable_code_point();
+        let emoji_modifiers = icu_sets::emoji_modifier();
+        let variation_selectors = icu_sets::variation_selector();
+
+        let mut emoji_sequence_active = false;
+        let mut dropping_emoji_sequence = false;
+
+        for mut c in working.chars() {
+            let is_emoji_char = is_emoji(c);
+            let is_modifier = emoji_modifiers.contains(c);
+            let is_variation_selector = variation_selectors.contains(c);
+            let is_emoji_component = is_modifier || is_variation_selector || c == '\u{200D}';
+
+            if self.options.keyboard_only
+                && matches!(self.options.emoji_policy, EmojiPolicy::Drop)
+                && is_emoji_char
+            {
+                stats.emojis_dropped += 1;
+                dropping_emoji_sequence = true;
+                emoji_sequence_active = false;
+                continue;
+            }
+
+            if dropping_emoji_sequence {
+                if is_emoji_char {
+                    stats.emojis_dropped += 1;
+                    continue;
+                }
+                if is_emoji_component || default_ignorables.contains(c) {
+                    continue;
+                }
+                dropping_emoji_sequence = false;
+            }
+
+            if is_emoji_char {
+                emoji_sequence_active = true;
+            } else if !is_emoji_component {
+                emoji_sequence_active = false;
+            }
+
+            if self.options.remove_hidden && default_ignorables.contains(c) {
+                let keep_hidden = emoji_sequence_active
+                    && (!self.options.keyboard_only
+                        || matches!(self.options.emoji_policy, EmojiPolicy::Keep));
+                if !keep_hidden {
+                    stats.hidden_chars_removed += 1;
+                    continue;
+                }
+            }
+
+            if self.options.remove_control_chars && is_disallowed_control(c) {
+                stats.control_chars_removed += 1;
+                continue;
+            }
+
+            if self.options.normalize_spaces {
+                if let Some(mapped) = SPACE_MAP.get(&c) {
+                    c = *mapped;
+                    stats.spaces_normalized += 1;
+                }
+            }
+
+            if c == '\n' {
+                if trim {
+                    stats.trailing_whitespace_removed += pending_ws;
+                    pending_ws = 0;
+                } else {
+                    flush_pending_whitespace(&mut out, pending_ws, collapse);
+                    pending_ws = 0;
+                }
+                out.push('\n');
+                continue;
+            }
+
+            if self.options.normalize_dashes {
+                if let Some('-') = map_dash(c) {
+                    if c != '-' {
+                        stats.dashes_normalized += 1;
+                    }
+                    c = '-';
+                }
+            }
+
+            if self.options.normalize_quotes {
+                if let Some(mapped) = map_quote(c) {
+                    if mapped != c {
+                        stats.quotes_normalized += 1;
+                        c = mapped;
+                    }
+                }
+            }
+
+            if self.options.normalize_other {
+                match c {
+                    FRACTION_SLASH => {
+                        c = '/';
+                        stats.other_normalized += 1;
+                    }
+                    HORIZONTAL_ELLIPSIS | MIDLINE_HORIZONTAL_ELLIPSIS => {
+                        flush_pending_whitespace(&mut out, pending_ws, collapse);
+                        pending_ws = 0;
+                        out.push_str("...");
+                        stats.other_normalized += 1;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
+            if c == ' ' || c == '\t' {
+                pending_ws += 1;
+                continue;
+            } else if pending_ws > 0 {
+                flush_pending_whitespace(&mut out, pending_ws, collapse);
+                pending_ws = 0;
+            }
+
+            if self.options.keyboard_only && !is_keyboard_ascii(c) {
+                let keep_emoji = emoji_sequence_active
+                    && matches!(self.options.emoji_policy, EmojiPolicy::Keep)
+                    && (is_emoji_char || is_emoji_component);
+                if keep_emoji {
+                    out.push(c);
+                } else {
+                    stats.non_keyboard_removed += 1;
+                    continue;
+                }
+            } else {
+                out.push(c);
+            }
+        }
+
+        if trim {
+            stats.trailing_whitespace_removed += pending_ws;
+        } else {
+            flush_pending_whitespace(&mut out, pending_ws, collapse);
+        }
+
+        let mut text = out;
+        if let Some(style) = self.options.normalize_line_endings {
+            text = match style {
+                LineEndingStyle::Lf => text,
+                LineEndingStyle::Crlf => text.replace('\n', "\r\n"),
+                LineEndingStyle::Cr => text.replace('\n', "\r"),
+            };
+        }
+
+        let changes_made = aggregate_changes(&stats);
+        CleaningResult {
+            text,
+            changes_made,
+            stats,
+        }
+    }
+
+    fn apply_unicode_normalization(&self, text: &str) -> String {
+        match self.options.unicode_normalization {
             UnicodeNormalizationMode::None => text.to_owned(),
             #[cfg(feature = "unorm")]
             UnicodeNormalizationMode::NFD => text.nfd().collect(),
@@ -172,153 +364,67 @@ impl TextCleaner {
             UnicodeNormalizationMode::NFKC => text.nfkc().collect(),
             #[cfg(not(feature = "unorm"))]
             _ => text.to_owned(),
-        };
-
-        // 2) Normalize line endings to LF internally + count (only if requested)
-        if self.options.normalize_line_endings.is_some() {
-            let (lf, changed) = to_lf(&input);
-            input = lf;
-            stats.line_endings_normalized += changed;
-        }
-
-        // 3) Single pass over chars with look-ahead buffer for trimming & collapsing
-        let mut out = String::with_capacity(input.len());
-        let mut pending_ws: usize = 0;
-        let trim = self.options.remove_trailing_whitespace;
-        let collapse = self.options.collapse_whitespace;
-
-        for mut c in input.chars() {
-            // Remove control chars (except allowed whitespace)
-            if self.options.remove_control_chars {
-                let cu = c as u32;
-                let is_cc = (cu <= 0x1F) || (0x7F..=0x9F).contains(&cu);
-                if is_cc && c != '\n' && c != '\r' && c != '\t' {
-                    stats.control_chars_removed += 1;
-                    continue;
-                }
-            }
-
-            // Remove hidden/invisible format chars
-            if self.options.remove_hidden && is_hidden_char(c) {
-                stats.hidden_chars_removed += 1;
-                continue;
-            }
-
-            // Normalize spaces
-            if self.options.normalize_spaces {
-                c = normalize_space_like(c, &mut stats.spaces_normalized);
-            }
-
-            // Handle CR/LF without changing style unless normalize_line_endings was set
-            if c == '\n' || c == '\r' {
-                if trim {
-                    stats.trailing_whitespace_removed += pending_ws;
-                    pending_ws = 0;
-                } else {
-                    // flush pending spaces
-                    for _ in 0..pending_ws {
-                        out.push(' ');
-                    }
-                    pending_ws = 0;
-                }
-                out.push(c);
-                continue;
-            }
-
-            // Normalize punctuation
-            if self.options.normalize_dashes {
-                if let Some('-') = map_dash(c) {
-                    c = '-';
-                    stats.dashes_normalized += 1;
-                }
-            }
-            if self.options.normalize_quotes {
-                if let Some(q) = map_quote(c) {
-                    c = q;
-                    stats.quotes_normalized += 1;
-                }
-            }
-            if self.options.normalize_other && c == '…' {
-                // Flush pending spaces before multi-char insert
-                if pending_ws > 0 {
-                    if collapse {
-                        out.push(' ');
-                    } else {
-                        for _ in 0..pending_ws {
-                            out.push(' ');
-                        }
-                    }
-                    pending_ws = 0;
-                }
-                out.push_str("...");
-                stats.other_normalized += 1;
-                continue;
-            }
-
-            // Accumulate spaces/tabs, flush later
-            if c == ' ' || c == '\t' {
-                pending_ws += 1;
-                continue;
-            } else if pending_ws > 0 {
-                if collapse {
-                    out.push(' ');
-                } else {
-                    for _ in 0..pending_ws {
-                        out.push(' ');
-                    }
-                }
-                pending_ws = 0;
-            }
-
-            // Keyboard-only filter
-            if self.options.keyboard_only {
-                if is_keyboard_ascii(c) {
-                    out.push(c);
-                } else if is_emoji(c) {
-                    if matches!(self.options.emoji_policy, EmojiPolicy::Keep) {
-                        out.push(c);
-                    } else {
-                        stats.emojis_dropped += 1;
-                    }
-                } else {
-                    stats.non_keyboard_removed += 1;
-                }
-            } else {
-                out.push(c);
-            }
-        }
-
-        // End of text: either flush or drop pending spaces based on trimming option
-        if trim {
-            stats.trailing_whitespace_removed += pending_ws;
-        } else {
-            for _ in 0..pending_ws {
-                out.push(' ');
-            }
-        }
-
-        // 4) Emit requested EOL style
-        if let Some(style) = self.options.normalize_line_endings {
-            let out = match style {
-                LineEndingStyle::Lf => out,
-                LineEndingStyle::Crlf => out.replace('\n', "\r\n"),
-                LineEndingStyle::Cr => out.replace('\n', "\r"),
-            };
-            let changes_made = aggregate_changes(&stats);
-            return CleaningResult {
-                text: out,
-                changes_made,
-                stats,
-            };
-        }
-
-        let changes_made = aggregate_changes(&stats);
-        CleaningResult {
-            text: out,
-            changes_made,
-            stats,
         }
     }
+
+    fn can_use_ascii_fast_path(&self, text: &str) -> bool {
+        if !text.is_ascii() {
+            return false;
+        }
+        if self.options.keyboard_only
+            || self.options.collapse_whitespace
+            || self.options.normalize_line_endings.is_some()
+        {
+            return false;
+        }
+        if !matches!(
+            self.options.unicode_normalization,
+            UnicodeNormalizationMode::None
+        ) {
+            return false;
+        }
+
+        let mut trailing_ws = 0usize;
+        for c in text.chars() {
+            if self.options.remove_control_chars && is_disallowed_control(c) {
+                return false;
+            }
+            match c {
+                ' ' | '\t' => trailing_ws += 1,
+                '\n' | '\r' => {
+                    if self.options.remove_trailing_whitespace && trailing_ws > 0 {
+                        return false;
+                    }
+                    trailing_ws = 0;
+                }
+                _ => trailing_ws = 0,
+            }
+        }
+
+        if self.options.remove_trailing_whitespace && trailing_ws > 0 {
+            return false;
+        }
+
+        true
+    }
+}
+
+fn flush_pending_whitespace(out: &mut String, pending: usize, collapse: bool) {
+    if pending == 0 {
+        return;
+    }
+    if collapse {
+        out.push(' ');
+    } else {
+        for _ in 0..pending {
+            out.push(' ');
+        }
+    }
+}
+
+fn is_disallowed_control(c: char) -> bool {
+    let cu = c as u32;
+    ((cu <= 0x1F) || (0x7F..=0x9F).contains(&cu)) && c != '\n' && c != '\r' && c != '\t'
 }
 
 fn aggregate_changes(stats: &CleaningStats) -> usize {
@@ -359,45 +465,11 @@ fn to_lf(s: &str) -> (String, usize) {
 }
 
 fn map_dash(c: char) -> Option<char> {
-    match c {
-        '\u{2010}' | // hyphen
-        '\u{2011}' | // non-breaking hyphen
-        '\u{2012}' | // figure dash
-        '\u{2013}' | // en dash
-        '\u{2014}' | // em dash
-        '\u{2015}' | // horizontal bar
-        '\u{2212}' | // minus
-        '\u{FE58}' | // small em dash
-        '\u{FE63}' | // small hyphen-minus
-        '\u{FF0D}'   // fullwidth hyphen-minus
-            => Some('-'),
-        _ => None,
-    }
+    DASH_MAP.get(&c).copied()
 }
 
 fn map_quote(c: char) -> Option<char> {
-    match c {
-        // double
-        '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' | '\u{00AB}' | '\u{00BB}'
-        | '\u{2033}' | '\u{2034}' | '\u{301D}' | '\u{301E}' | '\u{301F}' => Some('\"'),
-        // single / apostrophe-like
-        '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' | '\u{2032}' | '\u{2035}'
-        | '\u{2039}' | '\u{203A}' | '\u{02BC}' => Some('\''),
-        _ => None,
-    }
-}
-
-fn normalize_space_like(c: char, counter: &mut usize) -> char {
-    match c {
-        '\u{00A0}' | // NBSP
-        '\u{1680}' | // Ogham space mark
-        '\u{2000}'..='\u{200A}' | // en/em/thin/hair/etc.
-        '\u{202F}' | // narrow no-break space
-        '\u{205F}' | // medium mathematical space
-        '\u{3000}'   // ideographic space
-            => { *counter += 1; ' ' }
-        _ => c,
-    }
+    QUOTE_MAP.get(&c).copied()
 }
 
 /// Convenience: clean with default options.
@@ -610,5 +682,33 @@ mod tests {
                 ch as u32
             );
         }
+    }
+
+    #[test]
+    fn fraction_slash_maps_to_ascii() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean("1\u{2044}2");
+        assert_eq!(out.text, "1/2");
+        assert_eq!(out.stats.other_normalized, 1);
+    }
+
+    #[test]
+    fn keeps_variation_selector_for_emoji() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean("👍\u{FE0F}");
+        assert_eq!(out.text, "👍\u{FE0F}");
+        assert_eq!(out.stats.hidden_chars_removed, 0);
+    }
+
+    #[test]
+    fn drops_emoji_sequence_when_policy_drop() {
+        let cleaner = TextCleaner::new(CleaningOptions {
+            keyboard_only: true,
+            emoji_policy: EmojiPolicy::Drop,
+            ..CleaningOptions::default()
+        });
+        let out = cleaner.clean("👍\u{FE0F}");
+        assert_eq!(out.text, "");
+        assert_eq!(out.stats.emojis_dropped, 1);
     }
 }

@@ -23,6 +23,14 @@ directories = "6.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.8"
 unicode-normalization = { version = "0.1", optional = true }
+phf = { version = "0.11", features = ["macros"] }
+icu_properties = { version = "1.5", features = ["compiled_data"] }
+
+[build-dependencies]
+phf_codegen = "0.11"
+ucd-parse = "0.1"
+unicode_names2 = "0.5"
+icu_properties = { version = "1.5", features = ["compiled_data"] }
 
 [[bin]]
 name = "rehuman"
