@@ -2,7 +2,9 @@
 
 Unicode-safe text cleaning & normalization for Rust.
 
-Strip invisible characters, normalize typography, and enforce consistent formatting-ideal for text sourced from web scraping, user input, or LLMs.
+Strip invisible characters, normalize typography, and enforce consistent formatting-ideal for text sourced from web scraping, user input, or [LLMs](https://archive.fo/PrRYl).
+
+> This crate is a Rust rewrite and expansion of [humanize-ai-lib](https://github.com/Nordth/humanize-ai-lib) by [Nordth](https://github.com/Nordth).
 
 ## Why rehuman?
 
@@ -16,6 +18,8 @@ Untrusted text often contains:
 **rehuman fixes this** in a single pass with predictable, measurable output.
 
 ## Installation
+
+Add this to your projects `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -34,7 +38,38 @@ let cleaned = clean("Hi\u{200B}there"); // -> "Hi there"
 let humanized = humanize("“Quote”—and…more"); // -> "\"Quote\"-and...more"
 ```
 
-## Features
+By default `clean` also strips emoji to guarantee ASCII-only output. Disable this with `CleanConfig::allow_emoji(true)` if you need to preserve them:
+
+```rust
+use rehuman::clean;
+
+let cleaned = clean("Thanks 👍"); // -> "Thanks "
+```
+
+## Local installation
+
+The CLI binaries (`rehuman` (_transform_) and `ishuman` (_detect_)) ship with the repo. Clone and install locally with:
+
+```bash
+git clone https://github.com/pszemraj/rehuman.git
+cd rehuman
+cargo install --path .
+```
+
+This places both commands on your `PATH`[^1]; run `rehuman --help` or `ishuman --help` to explore streaming, in-place, and detection options.
+
+[^1]: You may need to add `~/.cargo/bin` to your `PATH` if not already there: put `export PATH="$HOME/.cargo/bin:$PATH"` in your .bashrc/.zshrc.
+
+## Documentation
+
+More details are available in [docs/](/docs/):
+
+- [API Reference](/docs/api.md) - all functions, options, and statistics
+- [CLI Guide](/docs/cli.md) - usage of `rehuman` and `ishuman`
+- [Examples](/docs/examples.md) - recipes for common workloads
+- [Development Notes](/docs/development.md) - roadmap & implementation details
+
+## Detailed Features
 
 - **Invisible character removal**: ZWSP, BOM, bidi isolates, control characters
 - **Space normalization**: NBSP, figure space, ideographic space → ASCII space
@@ -44,13 +79,6 @@ let humanized = humanize("“Quote”—and…more"); // -> "\"Quote\"-and...mor
 - **Keyboard-only enforcement**: ASCII output with configurable emoji policy
 - **Detailed stats**: every cleaning run reports what changed
 - **CLI tooling**: `rehuman` (cleaner) and `ishuman` (detector) with streaming & in-place modes
-
-## Documentation
-
-- [API Reference](docs/api.md) - all functions, options, and statistics
-- [CLI Guide](docs/cli.md) - usage of `rehuman` and `ishuman`
-- [Examples](docs/examples.md) - recipes for common workloads
-- [Development Notes](docs/development.md) - roadmap & implementation details
 
 ## License
 
