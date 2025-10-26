@@ -30,7 +30,7 @@ let out = cleaner.clean("“Hello—world…”\u{00A0}😀");
 assert_eq!(out.text, "\"Hello-world...\" 😀");
 ```
 
-## Keyboard-only & emoji policy
+### Keyboard-only & emoji policy
 
 `keyboard_only` restricts output to ASCII keyboard characters plus whitespace (`\n`, `\r`, `\t`).
 When `keyboard_only = true`, you can choose what to do with emoji via:
@@ -38,7 +38,7 @@ When `keyboard_only = true`, you can choose what to do with emoji via:
 - `emoji_policy = EmojiPolicy::Drop` (default): drop emoji
 - `emoji_policy = EmojiPolicy::Keep`: allow emoji to pass through even when non-ASCII
 
-## Minimal API
+### Minimal API
 
 ```rust
 use rehuman::{clean, humanize};
@@ -47,11 +47,11 @@ let a = clean("Hi\u{200B}there");             // default preset
 let b = humanize("“Quote”—and…more");          // humanize preset
 ```
 
-## CLI
+### CLI
 
 Two binaries ship with the crate:
 
-- `rehuman` cleans text. `cargo run -- <args>` runs it directly, or `cargo install --path .` makes it globally available.  
+- `rehuman` cleans text. `cargo run -- <args>` runs it directly, or `cargo install --path .` makes it globally available.
   - `rehuman notes.txt` cleans a file (<= 5 MB) and writes normalized text to stdout; redirect if you want a file: `rehuman notes.txt > notes.clean.txt`.
   - Pipe data the same way: `curl https://example.com | rehuman --stats`. Stats are written to stderr so pipes stay clean.
   - Defaults enforce keyboard-only output and drop emoji. Override with flags such as `--keep-emoji`, `--keyboard-only=false`, `--unicode-normalization nfkc`, or `--line-endings crlf`.

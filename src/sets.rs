@@ -5,6 +5,7 @@ pub fn is_hidden_char(c: char) -> bool {
     matches!(
         c,
         // Zero width / format
+        '\u{180E}' | // Mongolian vowel separator
         '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' | '\u{00AD}' |
         // Bidi marks & isolates
         '\u{200E}' | '\u{200F}' |

@@ -379,9 +379,10 @@ fn map_quote(c: char) -> Option<char> {
     match c {
         // double
         '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' | '\u{00AB}' | '\u{00BB}'
-        | '\u{2033}' | '\u{301D}' | '\u{301E}' => Some('\"'),
+        | '\u{2033}' | '\u{2034}' | '\u{301D}' | '\u{301E}' | '\u{301F}' => Some('\"'),
         // single / apostrophe-like
-        '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' | '\u{2032}' | '\u{02BC}' => Some('\''),
+        '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' | '\u{2032}' | '\u{2035}'
+        | '\u{2039}' | '\u{203A}' | '\u{02BC}' => Some('\''),
         _ => None,
     }
 }
@@ -422,6 +423,14 @@ mod tests {
         let out = c.clean("Hello\u{200B}World");
         assert_eq!(out.text, "HelloWorld");
         assert_eq!(out.stats.hidden_chars_removed, 1);
+    }
+
+    #[test]
+    fn removes_mongolian_vowel_separator() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        let out = c.clean("Hello\u{180E}World");
+        assert_eq!(out.text, "HelloWorld");
+        assert!(out.stats.hidden_chars_removed >= 1);
     }
 
     #[test]
@@ -555,6 +564,22 @@ mod tests {
         );
         assert_eq!(out.stats.quotes_normalized, 7);
         assert_eq!(out.changes_made, 7);
+    }
+
+    #[test]
+    fn maps_additional_quotes_and_primes() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean("‹left› ‟double‟ ′prime′ ″double″");
+        assert_eq!(out.text, "'left' \"double\" 'prime' \"double\"");
+        assert!(out.stats.quotes_normalized >= 6);
+    }
+
+    #[test]
+    fn minus_sign_normalizes() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean("5 \u{2212} 3");
+        assert_eq!(out.text, "5 - 3");
+        assert!(out.stats.dashes_normalized >= 1);
     }
 
     #[test]
