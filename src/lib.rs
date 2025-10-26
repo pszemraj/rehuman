@@ -1,6 +1,6 @@
 //! rehuman — Unicode‑safe text cleaning & typographic normalization.
 
-use icu_properties::sets as icu_sets;
+use icu_properties::{props, CodePointSetData, CodePointSetDataBorrowed};
 use serde::Serialize;
 use std::borrow::Cow;
 use std::fmt;
@@ -488,7 +488,7 @@ impl TextCleaner {
         let collapse = self.options.collapse_whitespace;
 
         let mut emoji_classifier: Option<EmojiClassifier> = None;
-        let default_ignorables = icu_sets::default_ignorable_code_point();
+        let default_ignorables = CodePointSetData::new::<props::DefaultIgnorableCodePoint>();
         let mut cluster_buffer = String::new();
         #[cfg(feature = "security")]
         let bidi_controls = self
@@ -796,17 +796,17 @@ struct EmojiClusterContext {
 }
 
 struct EmojiClassifier {
-    emoji: icu_properties::sets::CodePointSetDataBorrowed<'static>,
-    emoji_presentation: icu_properties::sets::CodePointSetDataBorrowed<'static>,
-    extended_pictographic: icu_properties::sets::CodePointSetDataBorrowed<'static>,
+    emoji: CodePointSetDataBorrowed<'static>,
+    emoji_presentation: CodePointSetDataBorrowed<'static>,
+    extended_pictographic: CodePointSetDataBorrowed<'static>,
 }
 
 impl EmojiClassifier {
     fn new() -> Self {
         Self {
-            emoji: icu_sets::emoji(),
-            emoji_presentation: icu_sets::emoji_presentation(),
-            extended_pictographic: icu_sets::extended_pictographic(),
+            emoji: CodePointSetData::new::<props::Emoji>(),
+            emoji_presentation: CodePointSetData::new::<props::EmojiPresentation>(),
+            extended_pictographic: CodePointSetData::new::<props::ExtendedPictographic>(),
         }
     }
 }

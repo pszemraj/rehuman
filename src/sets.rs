@@ -1,8 +1,8 @@
-use icu_properties::sets;
+use icu_properties::{props, CodePointSetData};
 
 /// Hidden/format-like characters defined by Default_Ignorable_Code_Point (DI).
 pub fn is_hidden_char(c: char) -> bool {
-    sets::default_ignorable_code_point().contains(c)
+    CodePointSetData::new::<props::DefaultIgnorableCodePoint>().contains(c)
 }
 
 /// ASCII keyboard (US) characters + whitespace controls typically produced by keyboards.
@@ -13,5 +13,5 @@ pub fn is_keyboard_ascii(c: char) -> bool {
 
 /// Emoji detection via the Unicode `Emoji` binary property.
 pub fn is_emoji(c: char) -> bool {
-    sets::emoji().contains(c)
+    CodePointSetData::new::<props::Emoji>().contains(c)
 }

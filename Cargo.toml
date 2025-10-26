@@ -27,19 +27,19 @@ directories = "6.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "0.9.8"
 unicode-normalization = { version = "0.1", optional = true }
-phf = { version = "0.11", features = ["macros"] }
+phf = { version = "0.13.1", features = ["macros"] }
 unicode-segmentation = "1.12"
-icu_properties = { version = "1.5", features = ["compiled_data"] }
-serde_json = "1.0"
-tempfile = "3.10"
+icu_properties = { version = "2.0.1", features = ["compiled_data"] }
+serde_json = "1.0.145"
+tempfile = "3.23.0"
 
 [build-dependencies]
-phf_codegen = "0.11"
+phf_codegen = "0.13.1"
 ucd-parse = "0.1"
-icu_properties = { version = "1.5", features = ["compiled_data"] }
+icu_properties = { version = "2.0.1", features = ["compiled_data"] }
 
 [dev-dependencies]
-proptest = "1.5"
+proptest = "1.8.0"
 
 [[bin]]
 name = "rehuman"

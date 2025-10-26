@@ -4,7 +4,11 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use icu_properties::{maps, sets, GeneralCategory};
+use icu_properties::props::GeneralCategory;
+use icu_properties::{
+    props::{Dash, QuotationMark},
+    CodePointMapData, CodePointSetData,
+};
 use phf_codegen::Map as PhfMap;
 
 const QUOTE_DOUBLE_OVERRIDES: &[char] = &[
@@ -31,6 +35,9 @@ const QUOTE_DOUBLE_OVERRIDES: &[char] = &[
     '\u{301E}',  // DOUBLE PRIME QUOTATION MARK
     '\u{301F}',  // LOW DOUBLE PRIME QUOTATION MARK
 ];
+
+const DOUBLE_QUOTE_REPLACEMENT: &str = "'\"'";
+const SINGLE_QUOTE_REPLACEMENT: &str = "'\\''";
 
 const QUOTE_SINGLE_OVERRIDES: &[char] = &[
     '\u{0149}',  // LATIN SMALL LETTER N PRECEDED BY APOSTROPHE
@@ -68,13 +75,9 @@ fn main() {
     let mut dash_map = PhfMap::<char>::new();
     let mut quote_map = PhfMap::<char>::new();
 
-    let general_category = maps::general_category();
-    let space_separator_data = general_category.get_set_for_value(GeneralCategory::SpaceSeparator);
-    let space_separators = space_separator_data.as_borrowed();
-    let dash_chars = sets::dash();
-    let quotation_marks = sets::quotation_mark();
-
-    for range in space_separators.iter_ranges() {
+    for range in CodePointMapData::<GeneralCategory>::new()
+        .iter_ranges_for_value(GeneralCategory::SpaceSeparator)
+    {
         for codepoint in range {
             let ch = char::from_u32(codepoint).expect("valid code point");
             if ch != ' ' {
@@ -83,7 +86,7 @@ fn main() {
         }
     }
 
-    for range in dash_chars.iter_ranges() {
+    for range in CodePointSetData::new::<Dash>().iter_ranges() {
         for codepoint in range {
             let ch = char::from_u32(codepoint).expect("valid code point");
             if ch != '-' {
@@ -94,16 +97,16 @@ fn main() {
 
     let mut seen_quotes = HashSet::new();
 
-    for range in quotation_marks.iter_ranges() {
+    for range in CodePointSetData::new::<QuotationMark>().iter_ranges() {
         for codepoint in range {
             let ch = char::from_u32(codepoint).expect("valid code point");
             if ch == '\'' || ch == '"' {
                 continue;
             }
             let mapped = if QUOTE_DOUBLE_OVERRIDES.contains(&ch) {
-                "'\"'"
+                DOUBLE_QUOTE_REPLACEMENT
             } else {
-                "'\\''"
+                SINGLE_QUOTE_REPLACEMENT
             };
             if seen_quotes.insert(ch) {
                 quote_map.entry(ch, mapped);
@@ -116,7 +119,7 @@ fn main() {
             continue;
         }
         if seen_quotes.insert(ch) {
-            quote_map.entry(ch, "'\\''");
+            quote_map.entry(ch, SINGLE_QUOTE_REPLACEMENT);
         }
     }
 
@@ -125,7 +128,7 @@ fn main() {
             continue;
         }
         if seen_quotes.insert(ch) {
-            quote_map.entry(ch, "'\"'");
+            quote_map.entry(ch, DOUBLE_QUOTE_REPLACEMENT);
         }
     }
 

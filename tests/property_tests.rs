@@ -1,4 +1,4 @@
-use icu_properties::{maps, sets, GeneralCategory};
+use icu_properties::{props, CodePointMapData, CodePointSetData};
 use proptest::prelude::*;
 use rehuman::{clean, is_keyboard_ascii, CleaningOptions, EmojiPolicy, StreamCleaner, TextCleaner};
 use unicode_segmentation::UnicodeSegmentation;
@@ -9,9 +9,9 @@ fn sample_string() -> impl Strategy<Value = String> {
 
 fn grapheme_is_rendered_emoji(grapheme: &str) -> bool {
     let chars: Vec<char> = grapheme.chars().collect();
-    let emoji = sets::emoji();
-    let emoji_presentation = sets::emoji_presentation();
-    let extended_pictographic = sets::extended_pictographic();
+    let emoji = CodePointSetData::new::<props::Emoji>();
+    let emoji_presentation = CodePointSetData::new::<props::EmojiPresentation>();
+    let extended_pictographic = CodePointSetData::new::<props::ExtendedPictographic>();
 
     let mut has_emoji_presentation = false;
     let mut has_extended_pictographic = false;
@@ -45,7 +45,7 @@ fn grapheme_is_rendered_emoji(grapheme: &str) -> bool {
 
 #[test]
 fn dash_property_maps_to_ascii_hyphen() {
-    let dash_set = sets::dash();
+    let dash_set = CodePointSetData::new::<props::Dash>();
     for range in dash_set.iter_ranges() {
         for codepoint in range {
             let Some(ch) = char::from_u32(codepoint) else {
@@ -64,12 +64,10 @@ fn dash_property_maps_to_ascii_hyphen() {
 
 #[test]
 fn space_separators_collapse_to_ascii_space() {
-    let gc = maps::general_category();
-    let space_data = gc.get_set_for_value(GeneralCategory::SpaceSeparator);
-    let space_set = space_data.as_borrowed();
-
     let cleaner = TextCleaner::new(CleaningOptions::default());
-    for range in space_set.iter_ranges() {
+    for range in CodePointMapData::<props::GeneralCategory>::new()
+        .iter_ranges_for_value(props::GeneralCategory::SpaceSeparator)
+    {
         for codepoint in range {
             let Some(ch) = char::from_u32(codepoint) else {
                 continue;
@@ -87,7 +85,7 @@ fn space_separators_collapse_to_ascii_space() {
 
 #[test]
 fn quotation_marks_normalize_to_ascii() {
-    let quotation_set = sets::quotation_mark();
+    let quotation_set = CodePointSetData::new::<props::QuotationMark>();
     let cleaner = TextCleaner::new(CleaningOptions::default());
 
     for range in quotation_set.iter_ranges() {
@@ -161,7 +159,7 @@ proptest! {
     #[test]
     fn removing_hidden_characters_eliminates_default_ignorables(input in sample_string()) {
         let output = clean(&input);
-        let default_ignorables = sets::default_ignorable_code_point();
+        let default_ignorables = CodePointSetData::new::<props::DefaultIgnorableCodePoint>();
         prop_assert!(
             !output.text
                 .chars()
