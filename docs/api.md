@@ -6,7 +6,10 @@
   - [Core Helpers](#core-helpers)
   - [TextCleaner](#textcleaner)
     - [CleaningOptions Fields](#cleaningoptions-fields)
+    - [Builder API](#builder-api)
     - [Cleaning Statistics](#cleaning-statistics)
+  - [Reusing Buffers](#reusing-buffers)
+  - [Streaming](#streaming)
   - [Feature Flags](#feature-flags)
   - [Error Handling](#error-handling)
 
@@ -72,6 +75,7 @@ println!("dashes normalized: {}", result.stats.dashes_normalized);
 | `collapse_whitespace`        | Collapse consecutive spaces/tabs to a single space                |
 | `normalize_line_endings`     | Force LF/CRLF/CR output                                           |
 | `unicode_normalization`      | Unicode normalization mode (`None`, `NFD`, `NFC`, `NFKD`, `NFKC`) |
+| `strip_bidi_controls`        | (feature: `security`) Remove Unicode bidi override/control chars  |
 
 ### Builder API
 
@@ -83,6 +87,7 @@ let options = CleaningOptions::builder()
     .emoji_policy(EmojiPolicy::Keep)
     .remove_hidden(false)
     .normalize_line_endings(None)
+    .strip_bidi_controls(true) // requires the `security` feature
     .build();
 ```
 
@@ -153,10 +158,11 @@ println!("changes: {}", summary.changes_made);
 
 ## Feature Flags
 
-| Flag     | Default | Description                                                                                                                |
-| -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `unorm`  | enabled | Enables Unicode normalization support via the `unicode-normalization` crate. If disabled, requesting normalization will panic at runtime. |
-| `stats`  | enabled | Collects per-change counters in the hot path. Disable to skip tracking overhead while keeping change detection accurate.   |
+| Flag       | Default  | Description                                                                                                                               |
+| ---------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `unorm`    | enabled  | Enables Unicode normalization support via the `unicode-normalization` crate. If disabled, requesting normalization will panic at runtime. |
+| `stats`    | enabled  | Collects per-change counters in the hot path. Disable to skip tracking overhead while keeping change detection accurate.                  |
+| `security` | disabled | Enables bidi-control stripping and related helpers (opt-in hardening).                                                                    |
 
 ## Error Handling
 

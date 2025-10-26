@@ -42,6 +42,7 @@ pub enum EmojiPolicy {
 }
 
 /// Detailed statistics about cleaning operations.
+#[cfg(feature = "stats")]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct CleaningStats {
     pub hidden_chars_removed: u64,
@@ -54,7 +55,13 @@ pub struct CleaningStats {
     pub line_endings_normalized: u64,
     pub non_keyboard_removed: u64,
     pub emojis_dropped: u64,
+    #[cfg(feature = "security")]
+    pub bidi_controls_removed: u64,
 }
+
+#[cfg(not(feature = "stats"))]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct CleaningStats;
 
 /// Result of a text cleaning operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -64,6 +71,7 @@ pub struct CleaningResult<'a> {
     pub stats: CleaningStats,
 }
 
+#[cfg(feature = "stats")]
 impl CleaningStats {
     /// Merge another stats snapshot into this one.
     pub fn accumulate(&mut self, other: &CleaningStats) {
@@ -93,6 +101,12 @@ impl CleaningStats {
             .non_keyboard_removed
             .saturating_add(other.non_keyboard_removed);
         self.emojis_dropped = self.emojis_dropped.saturating_add(other.emojis_dropped);
+        #[cfg(feature = "security")]
+        {
+            self.bidi_controls_removed = self
+                .bidi_controls_removed
+                .saturating_add(other.bidi_controls_removed);
+        }
     }
 }
 
@@ -123,6 +137,12 @@ macro_rules! record_change {
     }};
 }
 
+#[cfg(not(feature = "stats"))]
+impl CleaningStats {
+    #[inline]
+    pub fn accumulate(&mut self, _: &CleaningStats) {}
+}
+
 /// Configuration for cleaning.
 #[derive(Debug, Clone)]
 pub struct CleaningOptions {
@@ -138,6 +158,8 @@ pub struct CleaningOptions {
     pub collapse_whitespace: bool,
     pub normalize_line_endings: Option<LineEndingStyle>,
     pub unicode_normalization: UnicodeNormalizationMode,
+    #[cfg(feature = "security")]
+    pub strip_bidi_controls: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +182,8 @@ impl Default for CleaningOptions {
             collapse_whitespace: false,
             normalize_line_endings: None,
             unicode_normalization: UnicodeNormalizationMode::None,
+            #[cfg(feature = "security")]
+            strip_bidi_controls: false,
         }
     }
 }
@@ -186,6 +210,8 @@ impl CleaningOptions {
             collapse_whitespace: false,
             normalize_line_endings: None,
             unicode_normalization: UnicodeNormalizationMode::None,
+            #[cfg(feature = "security")]
+            strip_bidi_controls: false,
         }
     }
 
@@ -204,6 +230,8 @@ impl CleaningOptions {
             unicode_normalization: UnicodeNormalizationMode::NFC,
             collapse_whitespace: false,
             normalize_line_endings: None,
+            #[cfg(feature = "security")]
+            strip_bidi_controls: false,
         }
     }
 
@@ -222,6 +250,8 @@ impl CleaningOptions {
             unicode_normalization: UnicodeNormalizationMode::NFKC,
             collapse_whitespace: true,
             normalize_line_endings: None,
+            #[cfg(feature = "security")]
+            strip_bidi_controls: false,
         }
     }
 
@@ -240,6 +270,8 @@ impl CleaningOptions {
             collapse_whitespace: true,
             normalize_line_endings: Some(LineEndingStyle::Lf),
             unicode_normalization: UnicodeNormalizationMode::NFKC,
+            #[cfg(feature = "security")]
+            strip_bidi_controls: true,
         }
     }
 }
@@ -302,6 +334,12 @@ impl CleaningOptionsBuilder {
 
     pub fn unicode_normalization(mut self, mode: UnicodeNormalizationMode) -> Self {
         self.options.unicode_normalization = mode;
+        self
+    }
+
+    #[cfg(feature = "security")]
+    pub fn strip_bidi_controls(mut self, value: bool) -> Self {
+        self.options.strip_bidi_controls = value;
         self
     }
 
@@ -407,6 +445,11 @@ impl TextCleaner {
         let mut emoji_classifier: Option<EmojiClassifier> = None;
         let default_ignorables = icu_sets::default_ignorable_code_point();
         let mut cluster_buffer = String::new();
+        #[cfg(feature = "security")]
+        let bidi_controls = self
+            .options
+            .strip_bidi_controls
+            .then(|| icu_sets::bidi_control());
 
         for grapheme in UnicodeSegmentation::graphemes(working.as_ref(), true) {
             if grapheme.is_empty() {
@@ -451,6 +494,14 @@ impl TextCleaner {
             let mut emitted_directly = false;
 
             for mut c in grapheme.chars() {
+                #[cfg(feature = "security")]
+                if let Some(ref set) = bidi_controls {
+                    if set.contains(c) {
+                        record_change!(changes, stats, bidi_controls_removed);
+                        continue;
+                    }
+                }
+
                 if self.options.remove_hidden && default_ignorables.contains(c) {
                     // TODO: expose a preserve-joiners toggle so ZWJ/ZWNJ handling can be configured.
                     if keep_hidden {
@@ -984,6 +1035,21 @@ mod tests {
         let out = cleaner.clean(input);
         assert_eq!(out.text, "Hello\u{00A0}World!");
         assert_eq!(out.changes_made, 3);
+    }
+
+    #[cfg(feature = "security")]
+    #[test]
+    fn strips_bidi_controls_when_enabled() {
+        let mut options = CleaningOptions::default();
+        options.strip_bidi_controls = true;
+        let cleaner = TextCleaner::new(options);
+        let out = cleaner.clean("\u{202E}ab\u{202C}c");
+        assert_eq!(out.text, "abc");
+        assert!(out.changes_made >= 2);
+        #[cfg(feature = "stats")]
+        {
+            assert!(out.stats.bidi_controls_removed >= 2);
+        }
     }
 
     #[test]

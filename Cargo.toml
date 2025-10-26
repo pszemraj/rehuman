@@ -17,6 +17,7 @@ default-run = "rehuman"
 default = ["unorm", "stats"]
 # Enable full Unicode normalization (NFC/NFD/NFKC/NFKD)
 stats = []
+security = []
 unorm = ["dep:unicode-normalization"]
 
 [dependencies]

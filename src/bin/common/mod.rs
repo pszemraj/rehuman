@@ -119,6 +119,8 @@ pub struct PartialOptions {
     pub collapse_whitespace: Option<bool>,
     pub line_endings: Option<LineEndingChoice>,
     pub unicode_normalization: Option<UnicodeNormalizationChoice>,
+    #[cfg(feature = "security")]
+    pub strip_bidi_controls: Option<bool>,
 }
 
 impl PartialOptions {
@@ -159,6 +161,10 @@ impl PartialOptions {
         if let Some(choice) = self.unicode_normalization {
             options.unicode_normalization = choice.into();
         }
+        #[cfg(feature = "security")]
+        if let Some(val) = self.strip_bidi_controls {
+            options.strip_bidi_controls = val;
+        }
     }
 }
 
@@ -177,6 +183,8 @@ pub struct SerializableOptions {
     pub collapse_whitespace: bool,
     pub line_endings: LineEndingChoice,
     pub unicode_normalization: UnicodeNormalizationChoice,
+    #[cfg(feature = "security")]
+    pub strip_bidi_controls: bool,
 }
 
 impl Default for SerializableOptions {
@@ -187,20 +195,22 @@ impl Default for SerializableOptions {
 
 impl SerializableOptions {
     pub fn to_cleaning_options(&self) -> CleaningOptions {
-        CleaningOptions {
-            remove_hidden: self.remove_hidden,
-            remove_trailing_whitespace: self.remove_trailing_whitespace,
-            normalize_spaces: self.normalize_spaces,
-            normalize_dashes: self.normalize_dashes,
-            normalize_quotes: self.normalize_quotes,
-            normalize_other: self.normalize_other,
-            keyboard_only: self.keyboard_only,
-            emoji_policy: self.emoji_policy.into(),
-            remove_control_chars: self.remove_control_chars,
-            collapse_whitespace: self.collapse_whitespace,
-            normalize_line_endings: self.line_endings.into_option(),
-            unicode_normalization: self.unicode_normalization.into(),
-        }
+        let builder = CleaningOptions::builder()
+            .remove_hidden(self.remove_hidden)
+            .remove_trailing_whitespace(self.remove_trailing_whitespace)
+            .normalize_spaces(self.normalize_spaces)
+            .normalize_dashes(self.normalize_dashes)
+            .normalize_quotes(self.normalize_quotes)
+            .normalize_other(self.normalize_other)
+            .keyboard_only(self.keyboard_only)
+            .emoji_policy(self.emoji_policy.into())
+            .remove_control_chars(self.remove_control_chars)
+            .collapse_whitespace(self.collapse_whitespace)
+            .normalize_line_endings(self.line_endings.into_option())
+            .unicode_normalization(self.unicode_normalization.into());
+        #[cfg(feature = "security")]
+        let builder = builder.strip_bidi_controls(self.strip_bidi_controls);
+        builder.build()
     }
 
     pub fn from_cleaning_options(options: &CleaningOptions) -> Self {
@@ -217,6 +227,8 @@ impl SerializableOptions {
             collapse_whitespace: options.collapse_whitespace,
             line_endings: options.normalize_line_endings.into(),
             unicode_normalization: options.unicode_normalization.into(),
+            #[cfg(feature = "security")]
+            strip_bidi_controls: options.strip_bidi_controls,
         }
     }
 }
