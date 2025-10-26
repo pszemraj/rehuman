@@ -70,9 +70,7 @@ fn main() {
 }
 
 fn map_quote(ch: char) -> Option<char> {
-    let Some(name) = name(ch).map(|n| n.to_string()) else {
-        return None;
-    };
+    let name = name(ch).map(|n| n.to_string())?;
     classify_quote(&name)
 }
 
@@ -81,7 +79,8 @@ fn classify_quote(name: &str) -> Option<char> {
     if !(upper.contains("QUOTE")
         || upper.contains("QUOTATION MARK")
         || upper.contains("APOSTROPHE")
-        || upper.contains("PRIME"))
+        || upper.contains("PRIME")
+        || upper.contains("BRACKET"))
     {
         return None;
     }
@@ -91,7 +90,9 @@ fn classify_quote(name: &str) -> Option<char> {
         || upper.contains("DOUBLE PRIME")
         || upper.contains("DOUBLE ACUTE")
         || upper.contains("REVERSING QUOTATION MARK")
-        || (upper.contains("ANGLE QUOTATION MARK") && !upper.contains("SINGLE"));
+        || (upper.contains("QUOTATION MARK") && !upper.contains("SINGLE"))
+        || (upper.contains("ANGLE QUOTATION MARK") && !upper.contains("SINGLE"))
+        || (upper.contains("BRACKET") && (upper.contains("LEFT") || upper.contains("RIGHT")));
 
     if is_double {
         return Some('"');

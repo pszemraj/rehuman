@@ -4,6 +4,7 @@
 use unicode_normalization::UnicodeNormalization;
 
 use icu_properties::sets as icu_sets;
+use unicode_segmentation::UnicodeSegmentation;
 
 mod generated;
 mod sets;
@@ -197,68 +198,24 @@ impl TextCleaner {
         let collapse = self.options.collapse_whitespace;
 
         let default_ignorables = icu_sets::default_ignorable_code_point();
-        let emoji_modifiers = icu_sets::emoji_modifier();
-        let variation_selectors = icu_sets::variation_selector();
 
-        let mut emoji_sequence_active = false;
-        let mut dropping_emoji_sequence = false;
+        for grapheme in UnicodeSegmentation::graphemes(working.as_str(), true) {
+            let mut chars: Vec<char> = grapheme.chars().collect();
+            if chars.is_empty() {
+                continue;
+            }
 
-        for mut c in working.chars() {
-            let is_emoji_char = is_emoji(c);
-            let is_modifier = emoji_modifiers.contains(c);
-            let is_variation_selector = variation_selectors.contains(c);
-            let is_emoji_component = is_modifier || is_variation_selector || c == '\u{200D}';
+            let is_emoji_cluster = chars.iter().copied().any(is_emoji);
 
             if self.options.keyboard_only
                 && matches!(self.options.emoji_policy, EmojiPolicy::Drop)
-                && is_emoji_char
+                && is_emoji_cluster
             {
                 stats.emojis_dropped += 1;
-                dropping_emoji_sequence = true;
-                emoji_sequence_active = false;
                 continue;
             }
 
-            if dropping_emoji_sequence {
-                if is_emoji_char {
-                    stats.emojis_dropped += 1;
-                    continue;
-                }
-                if is_emoji_component || default_ignorables.contains(c) {
-                    continue;
-                }
-                dropping_emoji_sequence = false;
-            }
-
-            if is_emoji_char {
-                emoji_sequence_active = true;
-            } else if !is_emoji_component {
-                emoji_sequence_active = false;
-            }
-
-            if self.options.remove_hidden && default_ignorables.contains(c) {
-                let keep_hidden = emoji_sequence_active
-                    && (!self.options.keyboard_only
-                        || matches!(self.options.emoji_policy, EmojiPolicy::Keep));
-                if !keep_hidden {
-                    stats.hidden_chars_removed += 1;
-                    continue;
-                }
-            }
-
-            if self.options.remove_control_chars && is_disallowed_control(c) {
-                stats.control_chars_removed += 1;
-                continue;
-            }
-
-            if self.options.normalize_spaces {
-                if let Some(mapped) = SPACE_MAP.get(&c) {
-                    c = *mapped;
-                    stats.spaces_normalized += 1;
-                }
-            }
-
-            if c == '\n' {
+            if is_newline_grapheme(grapheme) {
                 if trim {
                     stats.trailing_whitespace_removed += pending_ws;
                     pending_ws = 0;
@@ -266,65 +223,112 @@ impl TextCleaner {
                     flush_pending_whitespace(&mut out, pending_ws, collapse);
                     pending_ws = 0;
                 }
-                out.push('\n');
+                out.push_str(grapheme);
                 continue;
             }
 
-            if self.options.normalize_dashes {
-                if let Some('-') = map_dash(c) {
-                    if c != '-' {
-                        stats.dashes_normalized += 1;
-                    }
-                    c = '-';
-                }
-            }
+            let keep_hidden = is_emoji_cluster
+                && (!self.options.keyboard_only
+                    || matches!(self.options.emoji_policy, EmojiPolicy::Keep));
 
-            if self.options.normalize_quotes {
-                if let Some(mapped) = map_quote(c) {
-                    if mapped != c {
-                        stats.quotes_normalized += 1;
+            let mut cluster_buffer = String::new();
+            let mut emitted_directly = false;
+
+            for mut c in chars.drain(..) {
+                if default_ignorables.contains(c) {
+                    if self.options.remove_hidden {
+                        if keep_hidden {
+                            cluster_buffer.push(c);
+                        } else {
+                            stats.hidden_chars_removed += 1;
+                        }
+                    } else {
+                        cluster_buffer.push(c);
+                    }
+                    continue;
+                }
+
+                if self.options.remove_control_chars && is_disallowed_control(c) {
+                    stats.control_chars_removed += 1;
+                    continue;
+                }
+
+                if self.options.normalize_spaces {
+                    if let Some(&mapped) = SPACE_MAP.get(&c) {
+                        stats.spaces_normalized += 1;
                         c = mapped;
                     }
                 }
-            }
 
-            if self.options.normalize_other {
-                match c {
-                    FRACTION_SLASH => {
-                        c = '/';
-                        stats.other_normalized += 1;
+                if self.options.normalize_dashes {
+                    if let Some(mapped) = map_dash(c) {
+                        if mapped != c {
+                            stats.dashes_normalized += 1;
+                        }
+                        c = mapped;
                     }
-                    HORIZONTAL_ELLIPSIS | MIDLINE_HORIZONTAL_ELLIPSIS => {
-                        flush_pending_whitespace(&mut out, pending_ws, collapse);
-                        pending_ws = 0;
-                        out.push_str("...");
-                        stats.other_normalized += 1;
-                        continue;
-                    }
-                    _ => {}
                 }
+
+                if self.options.normalize_quotes {
+                    if let Some(mapped) = map_quote(c) {
+                        if mapped != c {
+                            stats.quotes_normalized += 1;
+                        }
+                        c = mapped;
+                    }
+                }
+
+                if self.options.normalize_other {
+                    match c {
+                        FRACTION_SLASH => {
+                            c = '/';
+                            stats.other_normalized += 1;
+                        }
+                        HORIZONTAL_ELLIPSIS | MIDLINE_HORIZONTAL_ELLIPSIS => {
+                            flush_pending_whitespace(&mut out, pending_ws, collapse);
+                            pending_ws = 0;
+                            out.push_str("...");
+                            stats.other_normalized += 1;
+                            emitted_directly = true;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+
+                cluster_buffer.push(c);
             }
 
-            if c == ' ' || c == '\t' {
-                pending_ws += 1;
+            if emitted_directly {
                 continue;
-            } else if pending_ws > 0 {
+            }
+
+            if cluster_buffer.is_empty() {
+                continue;
+            }
+
+            if cluster_buffer.chars().all(|ch| matches!(ch, ' ' | '\t')) {
+                pending_ws += cluster_buffer.chars().count();
+                continue;
+            }
+
+            if pending_ws > 0 {
                 flush_pending_whitespace(&mut out, pending_ws, collapse);
                 pending_ws = 0;
             }
 
-            if self.options.keyboard_only && !is_keyboard_ascii(c) {
-                let keep_emoji = emoji_sequence_active
-                    && matches!(self.options.emoji_policy, EmojiPolicy::Keep)
-                    && (is_emoji_char || is_emoji_component);
-                if keep_emoji {
-                    out.push(c);
+            if self.options.keyboard_only {
+                if cluster_buffer.chars().all(is_keyboard_ascii)
+                    || (is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep))
+                {
+                    out.push_str(&cluster_buffer);
+                } else if is_emoji_cluster {
+                    stats.emojis_dropped += 1;
                 } else {
-                    stats.non_keyboard_removed += 1;
-                    continue;
+                    stats.non_keyboard_removed += cluster_buffer.chars().count();
                 }
             } else {
-                out.push(c);
+                out.push_str(&cluster_buffer);
             }
         }
 
@@ -425,6 +429,10 @@ fn flush_pending_whitespace(out: &mut String, pending: usize, collapse: bool) {
 fn is_disallowed_control(c: char) -> bool {
     let cu = c as u32;
     ((cu <= 0x1F) || (0x7F..=0x9F).contains(&cu)) && c != '\n' && c != '\r' && c != '\t'
+}
+
+fn is_newline_grapheme(g: &str) -> bool {
+    matches!(g, "\n" | "\r" | "\r\n")
 }
 
 fn aggregate_changes(stats: &CleaningStats) -> usize {
