@@ -199,14 +199,14 @@ proptest! {
         for ch in input.chars() {
             let chunk = ch.to_string();
             if let Some(result) = stream_cleaner.feed(&chunk, &mut chunk_buffer) {
-                let emitted = result.text.to_owned();
+                let emitted = result.text.into_owned();
                 out_buffer.push_str(&emitted);
                 chunk_buffer.clear();
             }
         }
 
         if let Some(result) = stream_cleaner.finish(&mut chunk_buffer) {
-            let emitted = result.text.to_owned();
+            let emitted = result.text.into_owned();
             out_buffer.push_str(&emitted);
             chunk_buffer.clear();
         }

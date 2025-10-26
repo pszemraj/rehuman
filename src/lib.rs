@@ -491,10 +491,12 @@ impl TextCleaner {
         let default_ignorables = CodePointSetData::new::<props::DefaultIgnorableCodePoint>();
         let mut cluster_buffer = String::new();
         #[cfg(feature = "security")]
-        let bidi_controls = self
-            .options
-            .strip_bidi_controls
-            .then(|| icu_sets::bidi_control());
+        let bidi_controls: Option<CodePointSetDataBorrowed<'static>> =
+            if self.options.strip_bidi_controls {
+                Some(CodePointSetData::new::<props::BidiControl>())
+            } else {
+                None
+            };
 
         for grapheme in UnicodeSegmentation::graphemes(working.as_ref(), true) {
             if grapheme.is_empty() {
@@ -540,7 +542,7 @@ impl TextCleaner {
 
             for mut c in grapheme.chars() {
                 #[cfg(feature = "security")]
-                if let Some(ref set) = bidi_controls {
+                if let Some(set) = bidi_controls {
                     if set.contains(c) {
                         record_change!(changes, stats, bidi_controls_removed);
                         continue;
@@ -1088,8 +1090,10 @@ mod tests {
     #[cfg(feature = "security")]
     #[test]
     fn strips_bidi_controls_when_enabled() {
-        let mut options = CleaningOptions::default();
-        options.strip_bidi_controls = true;
+        let options = CleaningOptions {
+            strip_bidi_controls: true,
+            ..CleaningOptions::default()
+        };
         let cleaner = TextCleaner::new(options);
         let out = cleaner.clean("\u{202E}ab\u{202C}c");
         assert_eq!(out.text, "abc");
