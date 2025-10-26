@@ -286,9 +286,9 @@ impl TextCleaner {
                 continue;
             }
 
-            let is_emoji_cluster = emoji_classifier.as_ref().map_or(false, |classifier| {
-                classify_emoji_cluster(grapheme, classifier).is_rendered
-            });
+            let is_emoji_cluster = emoji_classifier
+                .as_ref()
+                .is_some_and(|classifier| classify_emoji_cluster(grapheme, classifier).is_rendered);
 
             if self.options.keyboard_only
                 && matches!(self.options.emoji_policy, EmojiPolicy::Drop)
