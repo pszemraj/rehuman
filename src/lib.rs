@@ -478,4 +478,27 @@ mod tests {
         assert_eq!(out.text, "a\nb\nc\n");
         assert!(out.stats.line_endings_normalized >= 3);
     }
+
+    #[test]
+    fn default_cleaning_matches_keyboard_equivalent() {
+        let out = clean("“Hello—world…”\u{00A0}😀");
+        assert_eq!(out.text, "\"Hello-world...\" 😀");
+        assert_eq!(out.stats.quotes_normalized, 2);
+        assert_eq!(out.stats.dashes_normalized, 1);
+        assert_eq!(out.stats.other_normalized, 1);
+        assert_eq!(out.stats.spaces_normalized, 1);
+        assert_eq!(out.changes_made, 5);
+    }
+
+    #[test]
+    fn keyboard_only_drops_non_ascii_and_emoji() {
+        let cleaner = TextCleaner::new(CleaningOptions {
+            keyboard_only: true,
+            ..CleaningOptions::default()
+        });
+        let out = cleaner.clean("Ascii😀世界");
+        assert_eq!(out.text, "Ascii");
+        assert_eq!(out.stats.emojis_dropped, 1);
+        assert!(out.stats.non_keyboard_removed >= 2);
+    }
 }
