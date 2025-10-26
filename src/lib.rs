@@ -501,4 +501,89 @@ mod tests {
         assert_eq!(out.stats.emojis_dropped, 1);
         assert!(out.stats.non_keyboard_removed >= 2);
     }
+
+    #[test]
+    fn ts_whitespace_scenarios() {
+        let input = "Hello\u{200B}\u{00A0}World!  ";
+
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean(input);
+        assert_eq!(out.text, "Hello World!");
+        assert_eq!(out.changes_made, 4);
+
+        let cleaner = TextCleaner::new(CleaningOptions {
+            remove_trailing_whitespace: false,
+            ..CleaningOptions::default()
+        });
+        let out = cleaner.clean(input);
+        assert_eq!(out.text, "Hello World!  ");
+        assert_eq!(out.changes_made, 2);
+
+        let cleaner = TextCleaner::new(CleaningOptions {
+            remove_hidden: false,
+            ..CleaningOptions::default()
+        });
+        let out = cleaner.clean(input);
+        assert_eq!(out.text, "Hello\u{200B} World!");
+        assert_eq!(out.changes_made, 3);
+
+        let cleaner = TextCleaner::new(CleaningOptions {
+            normalize_spaces: false,
+            ..CleaningOptions::default()
+        });
+        let out = cleaner.clean(input);
+        assert_eq!(out.text, "Hello\u{00A0}World!");
+        assert_eq!(out.changes_made, 3);
+    }
+
+    #[test]
+    fn ts_dashes_case() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean("I — super — man – 💪");
+        assert_eq!(out.text, "I - super - man - 💪");
+        assert_eq!(out.stats.dashes_normalized, 3);
+        assert_eq!(out.changes_made, 3);
+    }
+
+    #[test]
+    fn ts_quotes_case() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean("Angular “quote” «marks» looks„ like Christmas «« tree");
+        assert_eq!(
+            out.text,
+            "Angular \"quote\" \"marks\" looks\" like Christmas \"\" tree"
+        );
+        assert_eq!(out.stats.quotes_normalized, 7);
+        assert_eq!(out.changes_made, 7);
+    }
+
+    #[test]
+    fn narrow_nbsp_is_normalized() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean("5\u{202F}MB");
+        assert_eq!(out.text, "5 MB");
+        assert_eq!(out.stats.spaces_normalized, 1);
+        assert_eq!(out.changes_made, 1);
+    }
+
+    #[test]
+    fn every_space_like_char_collapses_to_ascii_space() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let mut samples = vec!['\u{00A0}', '\u{1680}'];
+        samples.extend((0x2000..=0x200A).filter_map(std::char::from_u32));
+        samples.push('\u{202F}');
+        samples.push('\u{205F}');
+        samples.push('\u{3000}');
+
+        for ch in samples {
+            let input = format!("a{ch}b");
+            let out = cleaner.clean(&input);
+            assert_eq!(out.text, "a b", "failed for U+{:04X}", ch as u32);
+            assert_eq!(
+                out.stats.spaces_normalized, 1,
+                "expected a single normalization for U+{:04X}",
+                ch as u32
+            );
+        }
+    }
 }

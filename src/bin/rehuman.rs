@@ -1,5 +1,7 @@
 mod common;
 
+use std::fs;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
@@ -7,8 +9,9 @@ use clap::{ArgAction, Parser};
 
 use common::{
     default_cli_options, default_config_path, load_config, parse_bool_flag, read_input,
-    save_config, write_output, write_stats, EmojiPolicyArg, LineEndingChoice, PartialOptions,
-    UnicodeNormalizationChoice, MAX_INPUT_BYTES,
+    save_config, write_output, write_stats, ConfigFile, EmojiPolicyArg, LineEndingChoice,
+    PartialOptions, SerializableOptions, UnicodeNormalizationChoice, CONFIG_VERSION,
+    MAX_INPUT_BYTES,
 };
 use rehuman::TextCleaner;
 
@@ -16,6 +19,19 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let config_path = cli.config.clone().or_else(default_config_path);
+
+    if cli.reset_config {
+        if let Some(ref path) = config_path {
+            if path.exists() {
+                fs::remove_file(path)
+                    .with_context(|| format!("failed to remove config at {}", path.display()))?;
+            }
+        } else {
+            bail!(
+                "unable to determine config path; specify '--config <path>' when using '--reset-config'"
+            );
+        }
+    }
 
     let mut options = default_cli_options();
 
@@ -29,6 +45,35 @@ fn main() -> Result<()> {
     let overrides = cli.to_partial_options();
     overrides.apply_to(&mut options);
 
+    if cli.save_config {
+        if let Some(ref path) = config_path {
+            save_config(path, &options)
+                .with_context(|| format!("failed to write config to {}", path.display()))?;
+        } else {
+            bail!(
+                "unable to determine config path; specify '--config <path>' when using '--save-config'"
+            );
+        }
+    }
+
+    if cli.print_config {
+        let snapshot = ConfigFile {
+            version: CONFIG_VERSION,
+            options: SerializableOptions::from_cleaning_options(&options),
+        };
+        let toml = toml::to_string_pretty(&snapshot)?;
+        println!("{toml}");
+        return Ok(());
+    }
+
+    let stdin_is_terminal = std::io::stdin().is_terminal();
+    if cli.input.is_none() && stdin_is_terminal {
+        if cli.save_config || cli.reset_config {
+            return Ok(());
+        }
+        bail!("no input provided; pass a file path or pipe data into stdin");
+    }
+
     let input = read_input(cli.input.as_deref(), MAX_INPUT_BYTES)?;
 
     let cleaner = TextCleaner::new(options.clone());
@@ -38,17 +83,6 @@ fn main() -> Result<()> {
 
     if cli.stats {
         write_stats(&result);
-    }
-
-    if cli.save_config {
-        if let Some(path) = config_path {
-            save_config(&path, &options)
-                .with_context(|| format!("failed to write config to {}", path.display()))?;
-        } else {
-            bail!(
-                "unable to determine config path; specify '--config <path>' when using '--save-config'"
-            );
-        }
     }
 
     Ok(())
@@ -125,6 +159,14 @@ struct Cli {
     /// Persist the resolved configuration back to the config file.
     #[arg(long, action = ArgAction::SetTrue)]
     save_config: bool,
+
+    /// Print the resolved configuration (TOML) and exit.
+    #[arg(long, action = ArgAction::SetTrue)]
+    print_config: bool,
+
+    /// Remove the stored config file before applying overrides.
+    #[arg(long, action = ArgAction::SetTrue)]
+    reset_config: bool,
 
     /// Print a summary of applied transformations to stderr.
     #[arg(long, short = 's', action = ArgAction::SetTrue)]

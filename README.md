@@ -47,11 +47,12 @@ let b = humanize("“Quote”—and…more");          // humanize preset
 
 Two binaries ship with the crate:
 
-- `rehuman` cleans text. `cargo run -- <args>` runs it directly, or `cargo install --path .` makes it globally available.
-  - `rehuman notes.txt` cleans a file (≤5 MB) and writes normalized text to stdout; redirect if you want a file: `rehuman notes.txt > notes.clean.txt`.
+- `rehuman` cleans text. `cargo run -- <args>` runs it directly, or `cargo install --path .` makes it globally available.  
+  - `rehuman notes.txt` cleans a file (<= 5 MB) and writes normalized text to stdout; redirect if you want a file: `rehuman notes.txt > notes.clean.txt`.
   - Pipe data the same way: `curl https://example.com | rehuman --stats`. Stats are written to stderr so pipes stay clean.
   - Defaults enforce keyboard-only output and drop emoji. Override with flags such as `--keep-emoji`, `--keyboard-only=false`, `--unicode-normalization nfkc`, or `--line-endings crlf`.
   - Persist your preferred knobs with `--save-config`. Config lives under the platform config dir (e.g. `~/.config/rehuman/config.toml`); use `--config <path>` to point elsewhere.
+  - Inspect or manage settings with `--print-config` (shows the effective TOML) and `--reset-config` (removes the stored defaults before running).
 - `ishuman` checks whether text would change. It prints `1` when no normalization is needed and `0` otherwise.
   - `ishuman notes.txt` uses the same config/flags as `rehuman`. Add `--stats` for a breakdown (stderr) or `--exit-code` to surface the verdict via the process status.
 
