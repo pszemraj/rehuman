@@ -9,7 +9,7 @@ description = "Unicode-safe text cleaning & typographic normalization for Rust"
 repository = "https://github.com/pszemraj/rehuman"
 readme = "README.md"
 documentation = "https://docs.rs/rehuman"
-keywords = ["unicode", "normalize", "cleanup", "whitespace", "quotes", "dashes", "ellipsis"]
+keywords = ["text", "unicode", "normalization", "cleaning", "llm"]
 categories = ["text-processing", "parser-implementations"]
 default-run = "rehuman"
 
