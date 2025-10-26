@@ -238,11 +238,10 @@ impl Default for ConfigFile {
 }
 
 pub fn default_cli_options() -> CleaningOptions {
-    CleaningOptions {
-        keyboard_only: true,
-        emoji_policy: EmojiPolicy::Drop,
-        ..CleaningOptions::default()
-    }
+    CleaningOptions::builder()
+        .keyboard_only(true)
+        .emoji_policy(EmojiPolicy::Drop)
+        .build()
 }
 
 pub fn default_config_path() -> Option<PathBuf> {

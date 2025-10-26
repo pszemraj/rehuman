@@ -140,6 +140,11 @@ pub struct CleaningOptions {
     pub unicode_normalization: UnicodeNormalizationMode,
 }
 
+#[derive(Debug, Clone)]
+pub struct CleaningOptionsBuilder {
+    options: CleaningOptions,
+}
+
 impl Default for CleaningOptions {
     fn default() -> Self {
         Self {
@@ -160,6 +165,12 @@ impl Default for CleaningOptions {
 }
 
 impl CleaningOptions {
+    pub fn builder() -> CleaningOptionsBuilder {
+        CleaningOptionsBuilder {
+            options: CleaningOptions::default(),
+        }
+    }
+
     /// Minimal preset: only removes hidden/invisible chars.
     pub fn minimal() -> Self {
         Self {
@@ -181,18 +192,36 @@ impl CleaningOptions {
     /// Balanced preset for day-to-day text.
     pub fn balanced() -> Self {
         Self {
+            remove_hidden: true,
+            remove_trailing_whitespace: true,
+            normalize_spaces: true,
+            normalize_dashes: true,
+            normalize_quotes: true,
+            normalize_other: true,
+            keyboard_only: false,
+            emoji_policy: EmojiPolicy::Drop,
+            remove_control_chars: true,
             unicode_normalization: UnicodeNormalizationMode::NFC,
             collapse_whitespace: false,
-            ..Self::default()
+            normalize_line_endings: None,
         }
     }
 
     /// Humanize preset for AI/LLM-ish text.
     pub fn humanize() -> Self {
         Self {
+            remove_hidden: true,
+            remove_trailing_whitespace: true,
+            normalize_spaces: true,
+            normalize_dashes: true,
+            normalize_quotes: true,
+            normalize_other: true,
+            keyboard_only: false,
+            emoji_policy: EmojiPolicy::Drop,
+            remove_control_chars: true,
             unicode_normalization: UnicodeNormalizationMode::NFKC,
             collapse_whitespace: true,
-            ..Self::default()
+            normalize_line_endings: None,
         }
     }
 
@@ -212,6 +241,72 @@ impl CleaningOptions {
             normalize_line_endings: Some(LineEndingStyle::Lf),
             unicode_normalization: UnicodeNormalizationMode::NFKC,
         }
+    }
+}
+
+impl CleaningOptionsBuilder {
+    pub fn remove_hidden(mut self, value: bool) -> Self {
+        self.options.remove_hidden = value;
+        self
+    }
+
+    pub fn remove_trailing_whitespace(mut self, value: bool) -> Self {
+        self.options.remove_trailing_whitespace = value;
+        self
+    }
+
+    pub fn normalize_spaces(mut self, value: bool) -> Self {
+        self.options.normalize_spaces = value;
+        self
+    }
+
+    pub fn normalize_dashes(mut self, value: bool) -> Self {
+        self.options.normalize_dashes = value;
+        self
+    }
+
+    pub fn normalize_quotes(mut self, value: bool) -> Self {
+        self.options.normalize_quotes = value;
+        self
+    }
+
+    pub fn normalize_other(mut self, value: bool) -> Self {
+        self.options.normalize_other = value;
+        self
+    }
+
+    pub fn keyboard_only(mut self, value: bool) -> Self {
+        self.options.keyboard_only = value;
+        self
+    }
+
+    pub fn emoji_policy(mut self, policy: EmojiPolicy) -> Self {
+        self.options.emoji_policy = policy;
+        self
+    }
+
+    pub fn remove_control_chars(mut self, value: bool) -> Self {
+        self.options.remove_control_chars = value;
+        self
+    }
+
+    pub fn collapse_whitespace(mut self, value: bool) -> Self {
+        self.options.collapse_whitespace = value;
+        self
+    }
+
+    pub fn normalize_line_endings(mut self, value: Option<LineEndingStyle>) -> Self {
+        self.options.normalize_line_endings = value;
+        self
+    }
+
+    pub fn unicode_normalization(mut self, mode: UnicodeNormalizationMode) -> Self {
+        self.options.unicode_normalization = mode;
+        self
+    }
+
+    pub fn build(self) -> CleaningOptions {
+        self.options
     }
 }
 

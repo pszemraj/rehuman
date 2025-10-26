@@ -33,26 +33,23 @@ use rehuman::{
     CleaningOptions, EmojiPolicy, TextCleaner, UnicodeNormalizationMode,
 };
 
-let cleaner = TextCleaner::new(CleaningOptions {
+let options = CleaningOptions::builder()
     // Character normalization
-    normalize_quotes: true,
-    normalize_dashes: true,
-    normalize_other: true, // e.g. … -> ...
-
+    .normalize_quotes(true)
+    .normalize_dashes(true)
+    .normalize_other(true) // e.g. … -> ...
     // Unicode normalization
-    unicode_normalization: UnicodeNormalizationMode::NFKC,
-
+    .unicode_normalization(UnicodeNormalizationMode::NFKC)
     // Whitespace handling
-    remove_trailing_whitespace: true,
-    collapse_whitespace: true,
-    normalize_line_endings: Some(rehuman::LineEndingStyle::Lf),
-
+    .remove_trailing_whitespace(true)
+    .collapse_whitespace(true)
+    .normalize_line_endings(Some(rehuman::LineEndingStyle::Lf))
     // Keyboard enforcement
-    keyboard_only: true,
-    emoji_policy: EmojiPolicy::Drop,
+    .keyboard_only(true)
+    .emoji_policy(EmojiPolicy::Drop)
+    .build();
 
-    ..CleaningOptions::default()
-});
+let cleaner = TextCleaner::new(options);
 
 let result = cleaner.clean("“Hello—world…”\u{00A0}😀");
 assert_eq!(result.text, "\"Hello-world...\"");
@@ -75,6 +72,21 @@ println!("dashes normalized: {}", result.stats.dashes_normalized);
 | `collapse_whitespace`        | Collapse consecutive spaces/tabs to a single space                |
 | `normalize_line_endings`     | Force LF/CRLF/CR output                                           |
 | `unicode_normalization`      | Unicode normalization mode (`None`, `NFD`, `NFC`, `NFKD`, `NFKC`) |
+
+### Builder API
+
+Create tailored configurations with the fluent builder:
+
+```rust
+let options = CleaningOptions::builder()
+    .keyboard_only(true)
+    .emoji_policy(EmojiPolicy::Keep)
+    .remove_hidden(false)
+    .normalize_line_endings(None)
+    .build();
+```
+
+The presets (`minimal`, `balanced`, `humanize`, `aggressive`) now spell out every field explicitly, so they serve as documented baselines that you can tweak via the builder.
 
 ### Cleaning Statistics
 
