@@ -304,12 +304,10 @@ impl TextCleaner {
         let trim = self.options.remove_trailing_whitespace;
         let collapse = self.options.collapse_whitespace;
 
-        let emoji_classifier = if self.options.keyboard_only || self.options.remove_hidden {
-            Some(EmojiClassifier::new())
-        } else {
-            None
-        };
+        let needs_emoji = self.options.keyboard_only || self.options.remove_hidden;
+        let mut emoji_classifier: Option<EmojiClassifier> = None;
         let default_ignorables = icu_sets::default_ignorable_code_point();
+        let mut cluster_buffer = String::new();
 
         for grapheme in UnicodeSegmentation::graphemes(working.as_ref(), true) {
             if grapheme.is_empty() {
@@ -330,9 +328,12 @@ impl TextCleaner {
                 continue;
             }
 
-            let is_emoji_cluster = emoji_classifier
-                .as_ref()
-                .is_some_and(|classifier| classify_emoji_cluster(grapheme, classifier).is_rendered);
+            let is_emoji_cluster = if needs_emoji && !grapheme.is_ascii() {
+                let classifier = emoji_classifier.get_or_insert_with(EmojiClassifier::new);
+                classify_emoji_cluster(grapheme, classifier).is_rendered
+            } else {
+                false
+            };
 
             if self.options.keyboard_only
                 && matches!(self.options.emoji_policy, EmojiPolicy::Drop)
@@ -346,7 +347,8 @@ impl TextCleaner {
                 && (!self.options.keyboard_only
                     || matches!(self.options.emoji_policy, EmojiPolicy::Keep));
 
-            let mut cluster_buffer = String::new();
+            cluster_buffer.clear();
+            cluster_buffer.reserve(grapheme.len());
             let mut emitted_directly = false;
 
             for mut c in grapheme.chars() {
