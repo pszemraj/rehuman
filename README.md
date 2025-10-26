@@ -32,6 +32,9 @@ rehuman = "0.1.0" # replace with the latest published version
 cargo install rehuman
 ```
 
+<details>
+<summary><b>Click to Expand:</b> Build from Source</summary>
+
 For the latest version(s), clone this repo and run `cargo install --path .`:
 
 ```bash
@@ -44,7 +47,12 @@ Binaries will be installed to `~/.cargo/bin` by default.[^1]
 
 [^1]: You may need to add `~/.cargo/bin` to your `PATH` if it is not already there; add `export PATH="$HOME/.cargo/bin:$PATH"` to your shell profile (`.bashrc`, `.zshrc`, etc.).
 
+</details>
+
 ## Quick Start
+
+> [!WARNING]
+> This is an **early release** focused on correctness. Performance optimizations are in progress. Use `--stream` or `StreamCleaner` to stream large files.
 
 ### Library
 
@@ -71,15 +79,32 @@ Use `CleanConfig::allow_emoji(true)` if you need to preserve them.
 
 ### CLI
 
-```bash
-# Normalize text with streaming stats
-rehuman notes.txt --stream --stats
+`rehuman` reads the input and emits cleaned text to STDOUT-your source file stays untouched unless you pass `--inplace`:
 
-# Detect unsafe Unicode without modifying the file
+```bash
+# Stream-clean to STDOUT and capture stats
+rehuman notes.txt --stream --stats > notes.cleaned.txt
+
+# Overwrite the original file in place
+rehuman notes.txt --inplace
+```
+
+> [!TIP]
+> Both CLI tools act as filters, so you can drop them into pipelines
+
+```bash
+cat notes.txt | rehuman --stream | tee notes.cleaned.txt
+curl https://example.com/raw.txt | rehuman --stream --stats-json >/tmp/clean.txt
+```
+
+Use `ishuman` when you only need detection:
+
+```bash
+# Output exit code 1 if "human style text", else 0
 ishuman notes.txt --exit-code
 ```
 
-Run `rehuman --help` or `ishuman --help` for the full list of overrides (emoji policy, line endings, configs, streaming, etc.).
+Run `rehuman --help` or `ishuman --help` for the full list of flags (_emoji policy, line endings, configs, streaming, etc._).
 
 ## Documentation
 

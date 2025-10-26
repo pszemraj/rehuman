@@ -43,7 +43,6 @@ pub enum EmojiPolicy {
 }
 
 /// Detailed statistics about cleaning operations.
-#[cfg(feature = "stats")]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct CleaningStats {
     pub hidden_chars_removed: u64,
@@ -59,10 +58,6 @@ pub struct CleaningStats {
     #[cfg(feature = "security")]
     pub bidi_controls_removed: u64,
 }
-
-#[cfg(not(feature = "stats"))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
-pub struct CleaningStats;
 
 /// Result of a text cleaning operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -91,9 +86,9 @@ impl fmt::Display for CleaningError {
 
 impl std::error::Error for CleaningError {}
 
-#[cfg(feature = "stats")]
 impl CleaningStats {
     /// Merge another stats snapshot into this one.
+    #[cfg(feature = "stats")]
     pub fn accumulate(&mut self, other: &CleaningStats) {
         self.hidden_chars_removed = self
             .hidden_chars_removed
@@ -128,6 +123,12 @@ impl CleaningStats {
                 .saturating_add(other.bidi_controls_removed);
         }
     }
+
+    #[cfg(not(feature = "stats"))]
+    #[inline]
+    pub fn accumulate(&mut self, _: &CleaningStats) {
+        // No-op when stats are disabled.
+    }
 }
 
 #[cfg(feature = "stats")]
@@ -157,12 +158,6 @@ macro_rules! record_change {
     }};
 }
 
-#[cfg(not(feature = "stats"))]
-impl CleaningStats {
-    #[inline]
-    pub fn accumulate(&mut self, _: &CleaningStats) {}
-}
-
 /// Configuration for cleaning.
 #[derive(Debug, Clone)]
 pub struct CleaningOptions {
@@ -178,7 +173,7 @@ pub struct CleaningOptions {
     pub collapse_whitespace: bool,
     pub normalize_line_endings: Option<LineEndingStyle>,
     pub unicode_normalization: UnicodeNormalizationMode,
-    #[cfg(feature = "security")]
+    #[cfg_attr(not(feature = "security"), doc(hidden))]
     pub strip_bidi_controls: bool,
 }
 
@@ -202,7 +197,6 @@ impl Default for CleaningOptions {
             collapse_whitespace: false,
             normalize_line_endings: None,
             unicode_normalization: UnicodeNormalizationMode::None,
-            #[cfg(feature = "security")]
             strip_bidi_controls: false,
         }
     }
@@ -230,7 +224,6 @@ impl CleaningOptions {
             collapse_whitespace: false,
             normalize_line_endings: None,
             unicode_normalization: UnicodeNormalizationMode::None,
-            #[cfg(feature = "security")]
             strip_bidi_controls: false,
         }
     }
@@ -250,7 +243,6 @@ impl CleaningOptions {
             unicode_normalization: UnicodeNormalizationMode::NFC,
             collapse_whitespace: false,
             normalize_line_endings: None,
-            #[cfg(feature = "security")]
             strip_bidi_controls: false,
         }
     }
@@ -270,7 +262,6 @@ impl CleaningOptions {
             unicode_normalization: UnicodeNormalizationMode::NFKC,
             collapse_whitespace: true,
             normalize_line_endings: None,
-            #[cfg(feature = "security")]
             strip_bidi_controls: false,
         }
     }
@@ -290,7 +281,6 @@ impl CleaningOptions {
             collapse_whitespace: true,
             normalize_line_endings: Some(LineEndingStyle::Lf),
             unicode_normalization: UnicodeNormalizationMode::NFKC,
-            #[cfg(feature = "security")]
             strip_bidi_controls: true,
         }
     }
@@ -357,7 +347,7 @@ impl CleaningOptionsBuilder {
         self
     }
 
-    #[cfg(feature = "security")]
+    #[cfg_attr(not(feature = "security"), doc(hidden))]
     pub fn strip_bidi_controls(mut self, value: bool) -> Self {
         self.options.strip_bidi_controls = value;
         self
