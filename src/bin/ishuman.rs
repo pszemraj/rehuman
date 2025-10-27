@@ -14,6 +14,11 @@ use common::{
 use rehuman::TextCleaner;
 
 fn main() -> Result<()> {
+    let exit_code = run()?;
+    std::process::exit(exit_code);
+}
+
+fn run() -> Result<i32> {
     let cli = Cli::parse();
 
     let config_path = cli.config.clone().or_else(default_config_path);
@@ -49,15 +54,9 @@ fn main() -> Result<()> {
         };
         let mut stdout = io::stdout().lock();
         write_stats_json(&mut stdout, &summary)?;
-    } else {
-        println!("{}", if is_clean { 1 } else { 0 });
     }
 
-    if cli.exit_code {
-        std::process::exit(if is_clean { 0 } else { 1 });
-    }
-
-    Ok(())
+    Ok(if is_clean { 0 } else { 1 })
 }
 
 #[derive(Parser, Debug)]
@@ -140,10 +139,6 @@ struct Cli {
     /// Emit a JSON summary of potential transformations to stdout.
     #[arg(long = "json", action = ArgAction::SetTrue)]
     stats_json: bool,
-
-    /// Set the process exit code to 0 (clean) or 1 (needs cleanup).
-    #[arg(long, action = ArgAction::SetTrue)]
-    exit_code: bool,
 }
 
 impl Cli {
