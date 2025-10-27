@@ -393,6 +393,22 @@ impl TextCleaner {
     }
 
     pub fn try_clean<'a>(&self, text: &'a str) -> Result<CleaningResult<'a>, CleaningError> {
+        self.try_clean_with_context(text, false)
+    }
+
+    pub fn try_clean_into<'output>(
+        &self,
+        text: &str,
+        out: &'output mut String,
+    ) -> Result<CleaningResult<'output>, CleaningError> {
+        self.try_clean_into_with_context(text, out, false)
+    }
+
+    pub fn try_clean_with_context<'a>(
+        &self,
+        text: &'a str,
+        has_prior_output: bool,
+    ) -> Result<CleaningResult<'a>, CleaningError> {
         if text.is_empty() {
             return Ok(CleaningResult {
                 text: Cow::Borrowed(text),
@@ -411,7 +427,7 @@ impl TextCleaner {
 
         let working = self.normalize_input(text)?;
         let mut buffer = String::with_capacity(working.len());
-        let (changes, stats) = self.clean_into_internal(working, &mut buffer);
+        let (changes, stats) = self.clean_into_internal(working, &mut buffer, has_prior_output);
         Ok(CleaningResult {
             text: Cow::Owned(buffer),
             changes_made: changes,
@@ -419,10 +435,11 @@ impl TextCleaner {
         })
     }
 
-    pub fn try_clean_into<'output>(
+    pub fn try_clean_into_with_context<'output>(
         &self,
         text: &str,
         out: &'output mut String,
+        has_prior_output: bool,
     ) -> Result<CleaningResult<'output>, CleaningError> {
         out.clear();
 
@@ -444,7 +461,7 @@ impl TextCleaner {
         }
 
         let working = self.normalize_input(text)?;
-        let (changes, stats) = self.clean_into_internal(working, out);
+        let (changes, stats) = self.clean_into_internal(working, out, has_prior_output);
         Ok(CleaningResult {
             text: Cow::Borrowed(out.as_str()),
             changes_made: changes,
@@ -456,6 +473,7 @@ impl TextCleaner {
         &self,
         working_input: Cow<'_, str>,
         out: &mut String,
+        has_prior_output: bool,
     ) -> (u64, CleaningStats) {
         let mut stats = CleaningStats::default();
         let mut changes = 0u64;
@@ -475,7 +493,7 @@ impl TextCleaner {
         let mut pending_ws: usize = 0;
         let mut cap_next_whitespace = false;
         let mut drop_leading_whitespace = false;
-        let mut emitted_anything = false;
+        let mut emitted_anything = has_prior_output;
         let trim = self.options.remove_trailing_whitespace;
         let collapse = self.options.collapse_whitespace;
 
@@ -828,45 +846,23 @@ impl StreamCleaner {
         chunk: String,
         out: &'out mut String,
     ) -> CleaningResult<'out> {
-        const CONTEXT_SENTINEL: char = 'a';
-        let mut chunk = chunk;
-        let use_sentinel = self.has_emitted_output;
-        if use_sentinel {
-            chunk.insert(0, CONTEXT_SENTINEL);
-        }
+        let result = self
+            .cleaner
+            .try_clean_into_with_context(&chunk, out, self.has_emitted_output)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "StreamCleaner::feed failed: {err}. Enable the 'unorm' feature or use try_clean"
+                )
+            });
+        let emitted = result.text.as_ref();
 
-        let result = self.cleaner.try_clean(&chunk).unwrap_or_else(|err| {
-            panic!("StreamCleaner::feed failed: {err}. Enable the 'unorm' feature or use try_clean")
-        });
-        let CleaningResult {
-            text,
-            changes_made,
-            stats,
-        } = result;
-
-        out.clear();
-        let cleaned_text = text.as_ref();
-        if use_sentinel {
-            let stripped = cleaned_text
-                .strip_prefix(CONTEXT_SENTINEL)
-                .unwrap_or(cleaned_text);
-            out.push_str(stripped);
-        } else {
-            out.push_str(cleaned_text);
-        }
-        let emitted = &out[..];
-
-        self.total_stats.accumulate(&stats);
-        self.total_changes = self.total_changes.saturating_add(changes_made);
+        self.total_stats.accumulate(&result.stats);
+        self.total_changes = self.total_changes.saturating_add(result.changes_made);
         if !emitted.is_empty() {
             self.has_emitted_output = true;
         }
 
-        CleaningResult {
-            text: Cow::Borrowed(emitted),
-            changes_made,
-            stats,
-        }
+        result
     }
 }
 
