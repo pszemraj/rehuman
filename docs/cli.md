@@ -94,22 +94,23 @@ unicode_normalization = "nfkc"
 
 ## ishuman
 
-Determines if text would change when cleaned. Returns `1` when no changes are needed, `0` otherwise.
+Determines if text would change when cleaned. Exits with status `0` when no changes are needed and `1` when the input would be modified. By default no output is printed; add `--stats` or `--json` to learn what would change.
 
 ```bash
-# Basic check
+# Basic check (inspect exit status)
 ishuman notes.txt
+echo $?  # 0 when clean, 1 when changes are required
 
 # Stats and JSON output
 ishuman --stats notes.txt
 ishuman --json notes.txt
 
 # Use exit codes for scripting
-if ishuman --exit-code notes.txt; then
+if ishuman notes.txt; then
     echo "Text is clean"
 else
     echo "Text needs cleaning"
 fi
 ```
 
-`ishuman` accepts the same configuration flags as `rehuman` (normalization modes, keyboard-only, etc.).
+`ishuman` accepts the same configuration flags as `rehuman` (normalization modes, keyboard-only, etc.). The historical `--exit-code` flag is still accepted for compatibility but no longer required.

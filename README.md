@@ -100,20 +100,23 @@ curl https://example.com/raw.txt | rehuman --stream --stats-json >/tmp/clean.txt
 Use `ishuman` when you only need detection:
 
 ```bash
-# Output exit code 1 if "human style text", else 0
-ishuman notes.txt --exit-code
+# Exit status 0 when clean, 1 when changes would be made (no stdout by default)
+ishuman notes.txt
+
+# Add --stats or --json to explain what would change
+ishuman notes.txt --stats
 ```
 
 Run `rehuman --help` or `ishuman --help` for the full list of flags (_emoji policy, line endings, configs, streaming, etc._).
 
 ## Documentation
 
-More details are available in the [`docs/`](https://github.com/pszemraj/rehuman/tree/main/docs) folder:
+More details are available in the [`docs/`](docs/) folder:
 
-- [API Reference](https://github.com/pszemraj/rehuman/blob/main/docs/api.md) - all functions, options, and statistics
-- [CLI Guide](https://github.com/pszemraj/rehuman/blob/main/docs/cli.md) - usage of `rehuman` and `ishuman`
-- [Examples](https://github.com/pszemraj/rehuman/blob/main/docs/examples.md) - recipes for common workloads
-- [Development Notes](https://github.com/pszemraj/rehuman/blob/main/docs/development.md) - roadmap & implementation details
+- [API Reference](docs/api.md) - all functions, options, and statistics
+- [CLI Guide](docs/cli.md) - usage of `rehuman` and `ishuman`
+- [Examples](docs/examples.md) - recipes for common workloads
+- [Development Notes](docs/development.md) - roadmap & implementation details
 
 ## Detailed Features
 
