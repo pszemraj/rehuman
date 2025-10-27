@@ -139,10 +139,6 @@ struct Cli {
     /// Emit a JSON summary of potential transformations to stdout.
     #[arg(long = "json", action = ArgAction::SetTrue)]
     stats_json: bool,
-
-    /// Deprecated: exit status now reflects cleanliness by default (flag is ignored).
-    #[arg(long, action = ArgAction::SetTrue)]
-    exit_code: bool,
 }
 
 impl Cli {

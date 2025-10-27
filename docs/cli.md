@@ -113,4 +113,4 @@ else
 fi
 ```
 
-`ishuman` accepts the same configuration flags as `rehuman` (normalization modes, keyboard-only, etc.). The historical `--exit-code` flag is still accepted for compatibility but no longer required.
+`ishuman` accepts the same configuration flags as `rehuman` (normalization modes, keyboard-only, etc.).
