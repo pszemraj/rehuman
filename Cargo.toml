@@ -13,12 +13,17 @@ documentation = "https://docs.rs/rehuman"
 keywords = ["text", "unicode", "normalization", "cleaning", "llm"]
 categories = ["text-processing", "encoding"]
 default-run = "rehuman"
-exclude = [
-    "Cargo.toml.orig",
-    "scratch/**",
-    "data/**",
-    "target/**",
-    ".vscode/**",
+include = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "LICENSE",
+    "README.md",
+    "build.rs",
+    "config.example.toml",
+    "src/**",
+    "tests/**",
+    "docs/**",
+    "examples/**",
 ]
 
 [features]
