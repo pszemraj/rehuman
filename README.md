@@ -108,12 +108,12 @@ Run `rehuman --help` or `ishuman --help` for the full list of flags (_emoji poli
 
 ## Documentation
 
-More details are available in [docs/](/docs/):
+More details are available in the [`docs/`](https://github.com/pszemraj/rehuman/tree/main/docs) folder:
 
-- [API Reference](/docs/api.md) - all functions, options, and statistics
-- [CLI Guide](/docs/cli.md) - usage of `rehuman` and `ishuman`
-- [Examples](/docs/examples.md) - recipes for common workloads
-- [Development Notes](/docs/development.md) - roadmap & implementation details
+- [API Reference](https://github.com/pszemraj/rehuman/blob/main/docs/api.md) - all functions, options, and statistics
+- [CLI Guide](https://github.com/pszemraj/rehuman/blob/main/docs/cli.md) - usage of `rehuman` and `ishuman`
+- [Examples](https://github.com/pszemraj/rehuman/blob/main/docs/examples.md) - recipes for common workloads
+- [Development Notes](https://github.com/pszemraj/rehuman/blob/main/docs/development.md) - roadmap & implementation details
 
 ## Detailed Features
 

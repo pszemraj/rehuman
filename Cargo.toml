@@ -11,40 +11,42 @@ homepage = "https://github.com/pszemraj/rehuman"
 readme = "README.md"
 documentation = "https://docs.rs/rehuman"
 keywords = ["text", "unicode", "normalization", "cleaning", "llm"]
-categories = ["text-processing", "command-line-utilities"]
-default-run = "rehuman" # TODO: remove? if not needed
-include = [
-    "Cargo.toml",
-    "README*",
-    "LICENSE*",
-    "build.rs",
-    "src/**",
-    "examples/**",
+categories = ["text-processing", "encoding"]
+default-run = "rehuman"
+exclude = [
+    "Cargo.toml.orig",
+    "scratch/**",
+    "data/**",
+    "target/**",
+    ".vscode/**",
 ]
 
 [features]
 default = ["unorm", "stats"]
-# Enable full Unicode normalization (NFC/NFD/NFKC/NFKD)
+# Detailed per-operation statistics tracking
 stats = []
+# Optional hardening for bidi control stripping
 security = []
+# Full Unicode normalization (NFC/NFD/NFKC/NFKD)
 unorm = ["dep:unicode-normalization"]
 
 [dependencies]
-anyhow = "1.0.100"
-clap = { version = "4.5.50", features = ["derive"] }
-directories = "6.0.0"
-serde = { version = "1.0.228", features = ["derive"] }
-toml = "0.9.8"
-unicode-normalization = { version = "0.1", optional = true }
+# Core library surface
+unicode-normalization = { version = "0.1.24", optional = true }
 phf = { version = "0.13.1", features = ["macros"] }
 unicode-segmentation = "1.12"
 icu_properties = { version = "2.0.1", features = ["compiled_data"] }
+serde = { version = "1.0.228", features = ["derive"] }
+# CLI runtime (always built; crate is CLI-first)
+anyhow = "1.0.100"
+clap = { version = "4.5.50", features = ["derive"] }
+directories = "6.0.0"
+toml = "0.9.8"
 serde_json = "1.0.145"
 tempfile = "3.23.0"
 
 [build-dependencies]
 phf_codegen = "0.13.1"
-ucd-parse = "0.1"
 icu_properties = { version = "2.0.1", features = ["compiled_data"] }
 
 [dev-dependencies]
@@ -66,3 +68,7 @@ path = "src/lib.rs"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
