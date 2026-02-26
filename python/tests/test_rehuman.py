@@ -110,6 +110,22 @@ def test_presets_minimal_balanced_humanize_aggressive():
     assert aggressive.clean("Caf\u00e9").text == "Caf"
 
 
+def test_code_safe_preset_preserves_source_like_text():
+    code_safe = rehuman.Cleaner(rehuman.Options.code_safe_preset())
+    source_like = 'let input = "“Hello — world…”\\u{00A0}😀";'
+    result = code_safe.clean(source_like)
+    assert result.text == source_like
+    assert result.changes_made == 0
+
+
+def test_code_safe_preset_removes_hidden_and_control_chars():
+    code_safe = rehuman.Cleaner(rehuman.Options.code_safe_preset())
+    result = code_safe.clean("a\u200bb\x01")
+    assert result.text == "ab"
+    assert result.stats["hidden_chars_removed"] >= 1
+    assert result.stats["control_chars_removed"] >= 1
+
+
 def test_security_option_is_conditional():
     if rehuman.HAS_SECURITY:
         options = rehuman.Options(strip_bidi_controls=True)  # type: ignore[call-arg]

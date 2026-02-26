@@ -36,6 +36,7 @@ print(result.stats)        # dict with per-operation counters
 - `Options(...)`
 - `Cleaner(options: Options | None = None)`
 - `CleaningResult`
+- `Options.code_safe_preset()` for docs/source-safe normalization defaults
 
 Module constants:
 

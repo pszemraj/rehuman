@@ -254,6 +254,29 @@ impl Options {
         }
     }
 
+    #[staticmethod]
+    fn code_safe_preset() -> Self {
+        let builder = CleaningOptions::builder()
+            .remove_hidden(true)
+            .remove_trailing_whitespace(true)
+            .normalize_spaces(true)
+            .normalize_dashes(false)
+            .normalize_quotes(false)
+            .normalize_other(false)
+            .keyboard_only(false)
+            .emoji_policy(EmojiPolicy::Keep)
+            .remove_control_chars(true)
+            .collapse_whitespace(false)
+            .normalize_line_endings(None)
+            .unicode_normalization(UnicodeNormalizationMode::None);
+        #[cfg(feature = "security")]
+        let builder = builder.strip_bidi_controls(false);
+
+        Self {
+            inner: builder.build(),
+        }
+    }
+
     fn __repr__(&self) -> String {
         let o = &self.inner;
         #[cfg(feature = "security")]
