@@ -58,10 +58,10 @@ target/smoke/cli/
 - Practical prose cleanup outputs across default / `code-safe` / `humanize`
 - `ishuman` exit-code behavior for default versus `code-safe` content checks
 
-## Maintainer Guidance
+## Usage Notes
 
-- Run this flow manually before committing changes that affect:
+- Run this flow when changing:
   - CLI defaults, presets, or routing
   - text transformation behavior
   - output/exit-code semantics
-- Treat this output as a human-review gate, not a replacement for tests.
+- Use this as a practical smoke check in addition to automated tests.
