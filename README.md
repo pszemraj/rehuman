@@ -12,7 +12,7 @@ Add the Rust library crate:
 
 ```toml
 [dependencies]
-rehuman = "0.1.1" # replace with the latest published version
+rehuman = "0.1.2" # replace with the latest published version
 ```
 
 Install CLI binaries (`rehuman`, `ishuman`):

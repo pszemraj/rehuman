@@ -83,12 +83,12 @@ trigger PyPI publication for that release.
 Build/re-attach release artifacts for existing tag:
 
 - Dispatch `python-release-artifacts.yml`
-- Input `tag: v0.1.1` (or `0.1.1`)
+- Input `tag: v0.1.2` (or `0.1.2`)
 
 Re-publish existing release artifacts to PyPI (idempotent):
 
 - Dispatch `python-pypi-publish.yml`
-- Input `tag: v0.1.1` (or `0.1.1`)
+- Input `tag: v0.1.2` (or `0.1.2`)
 - Optional prerelease override: `allow_prerelease: true`
 
 ## Troubleshooting
