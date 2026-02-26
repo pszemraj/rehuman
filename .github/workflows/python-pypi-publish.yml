@@ -64,11 +64,28 @@ jobs:
             fi
 
             candidates=()
+            add_candidate() {
+              local candidate="$1"
+              if [[ -z "${candidate}" ]]; then
+                return
+              fi
+              for existing in "${candidates[@]}"; do
+                if [[ "${existing}" == "${candidate}" ]]; then
+                  return
+                fi
+              done
+              candidates+=("${candidate}")
+            }
+
+            add_candidate "${raw_tag}"
             if [[ "${raw_tag}" == [Vv]* ]]; then
-              normalized_tag="v${raw_tag#?}"
-              candidates+=("${normalized_tag}" "${normalized_tag#v}")
+              suffix="${raw_tag#?}"
+              add_candidate "v${suffix}"
+              add_candidate "V${suffix}"
+              add_candidate "${suffix}"
             else
-              candidates+=("v${raw_tag}" "${raw_tag}")
+              add_candidate "v${raw_tag}"
+              add_candidate "V${raw_tag}"
             fi
 
             api_err_file="$(mktemp)"
@@ -103,7 +120,7 @@ jobs:
           fi
 
           echo "tag=${resolved_tag}" >>"${GITHUB_OUTPUT}"
-          echo "version=${resolved_tag#v}" >>"${GITHUB_OUTPUT}"
+          echo "version=${resolved_tag#[vV]}" >>"${GITHUB_OUTPUT}"
           echo "prerelease=${prerelease}" >>"${GITHUB_OUTPUT}"
           echo "should_publish=${should_publish}" >>"${GITHUB_OUTPUT}"
 
@@ -176,13 +193,27 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
+          import re
           import sys
 
           dist = Path("dist")
           manifest_path = dist / "PYTHON_DIST_MANIFEST.json"
           sha_path = dist / "SHA256SUMS"
           errors = []
+          expected_version = os.environ.get("EXPECTED_VERSION", "").strip()
+          expected_sdist_name = (
+              f"rehuman-{expected_version}.tar.gz" if expected_version else None
+          )
+          wheel_name_pattern = (
+              re.compile(rf"^rehuman-{re.escape(expected_version)}-.*\.whl$")
+              if expected_version
+              else None
+          )
+
+          if not expected_version:
+              errors.append("EXPECTED_VERSION is empty; resolve step did not provide a version.")
 
           if not manifest_path.exists():
               errors.append("Missing dist/PYTHON_DIST_MANIFEST.json.")
@@ -206,15 +237,51 @@ jobs:
               errors.append("Manifest must list at least one wheel.")
           if len(expected_sdists) != 1:
               errors.append(f"Manifest must list exactly one sdist, found {len(expected_sdists)}.")
+          if len(set(expected_wheels)) != len(expected_wheels):
+              errors.append("Manifest wheel filenames must be unique.")
+          if len(set(expected_sdists)) != len(expected_sdists):
+              errors.append("Manifest sdist filenames must be unique.")
 
           expected_files = expected_wheels + expected_sdists
           present = {p.name for p in dist.iterdir() if p.is_file()}
+          downloaded_package_files = sorted(
+              p.name
+              for p in dist.iterdir()
+              if p.is_file() and (p.name.endswith(".whl") or p.name.endswith(".tar.gz"))
+          )
 
-          for name in expected_files:
+          for name in expected_wheels:
+              if not isinstance(name, str):
+                  errors.append(f"Manifest wheel filename must be a string, found {type(name).__name__}.")
+                  continue
               if not name.startswith("rehuman-"):
                   errors.append(f"Unexpected non-rehuman artifact name in manifest: {name!r}.")
+              if wheel_name_pattern and not wheel_name_pattern.fullmatch(name):
+                  errors.append(
+                      f"Wheel filename {name!r} does not match expected version {expected_version!r}."
+                  )
               if name not in present:
                   errors.append(f"Manifest-listed file is missing from dist/: {name}.")
+
+          for name in expected_sdists:
+              if not isinstance(name, str):
+                  errors.append(f"Manifest sdist filename must be a string, found {type(name).__name__}.")
+                  continue
+              if expected_sdist_name and name != expected_sdist_name:
+                  errors.append(
+                      f"Sdist filename {name!r} does not match expected {expected_sdist_name!r}."
+                  )
+              if name not in present:
+                  errors.append(f"Manifest-listed file is missing from dist/: {name}.")
+
+          unexpected_downloaded = [
+              name for name in downloaded_package_files if name not in expected_files
+          ]
+          if unexpected_downloaded:
+              errors.append(
+                  "Downloaded package files not declared in manifest: "
+                  + ", ".join(unexpected_downloaded)
+              )
 
           if errors:
               for error in errors:

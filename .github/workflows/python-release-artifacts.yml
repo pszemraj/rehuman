@@ -79,7 +79,11 @@ jobs:
           raw_ref=""
 
           if [[ "${EVENT_NAME}" == "release" ]]; then
-            raw_tag="${RELEASE_TAG}"
+            raw_tag="$(printf '%s' "${RELEASE_TAG}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+            if [[ -z "${raw_tag}" ]]; then
+              echo "::error::release event did not provide github.event.release.tag_name."
+              exit 1
+            fi
             test_mode="false"
           elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
             raw_tag=""
@@ -101,18 +105,36 @@ jobs:
 
           if [[ -n "${raw_tag}" ]]; then
             candidates=()
+
+            add_candidate() {
+              local candidate="$1"
+              if [[ -z "${candidate}" ]]; then
+                return
+              fi
+              for existing in "${candidates[@]}"; do
+                if [[ "${existing}" == "${candidate}" ]]; then
+                  return
+                fi
+              done
+              candidates+=("${candidate}")
+            }
+
+            add_candidate "${raw_tag}"
             if [[ "${raw_tag}" == [Vv]* ]]; then
-              normalized_tag="v${raw_tag#?}"
-              candidates+=("${normalized_tag}" "${normalized_tag#v}")
+              suffix="${raw_tag#?}"
+              add_candidate "v${suffix}"
+              add_candidate "V${suffix}"
+              add_candidate "${suffix}"
             else
-              candidates+=("v${raw_tag}" "${raw_tag}")
+              add_candidate "v${raw_tag}"
+              add_candidate "V${raw_tag}"
             fi
 
             for candidate in "${candidates[@]}"; do
               if git rev-parse -q --verify "refs/tags/${candidate}" >/dev/null; then
                 resolved_tag="${candidate}"
                 checkout_ref="refs/tags/${candidate}"
-                version="${candidate#v}"
+                version="${candidate#[vV]}"
                 break
               fi
             done
