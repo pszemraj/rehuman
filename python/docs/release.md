@@ -43,6 +43,7 @@ Dispatch nuance:
 
 - `workflow_dispatch` is only available when the workflow file exists on the default branch.
 - After that, dispatch can target another ref (`gh workflow run ... --ref <branch>`), which runs that ref's workflow content.
+- Workflow runs are serialized per ref/tag via concurrency groups to avoid parallel asset races.
 
 ### Workflow 2: Publish to PyPI
 
@@ -58,6 +59,7 @@ Behavior:
 - Prerelease status is read from GitHub Release metadata (`prerelease` field)
 - Downloads artifacts from GitHub Release assets (never rebuilds)
 - Waits for complete release assets before publish (`>=4` wheels, `>=1` sdist, and `SHA256SUMS`)
+- Downloads only Python package files (`rehuman-[0-9]*.whl`, `rehuman-[0-9]*.tar.gz`) plus `SHA256SUMS` to avoid non-Python release asset collisions.
 - Verifies expected wheel platform variants are present before publish
 - Verifies downloaded artifacts against `SHA256SUMS`
 - Publishes with idempotent mode (`skip-existing: true`)
@@ -135,4 +137,6 @@ Re-publish existing release artifacts to PyPI (idempotent):
 
 - Evaluate workspace-level version inheritance to reduce duplicate version bumps.
 - Revisit macOS x86_64 wheel coverage (either hosted Intel runner support or universal2 strategy).
+- Evaluate musllinux wheel coverage for Alpine-heavy deployment targets.
 - Consider adding Windows ARM64 wheel builds once runner support is stable.
+- Evaluate adding Rust dependency caching for non-Linux wheel builds.

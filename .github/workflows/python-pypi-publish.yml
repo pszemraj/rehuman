@@ -15,6 +15,10 @@ on:
         default: false
         type: boolean
 
+concurrency:
+  group: python-pypi-publish-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read
@@ -101,13 +105,13 @@ jobs:
               gh release view "${tag}" \
                 --repo "${GITHUB_REPOSITORY}" \
                 --json assets \
-                --jq '[.assets[].name | select(endswith(".whl"))] | length'
+                --jq '[.assets[].name | select(test("^rehuman-[0-9].*\\.whl$"))] | length'
             )"
             sdist_count="$(
               gh release view "${tag}" \
                 --repo "${GITHUB_REPOSITORY}" \
                 --json assets \
-                --jq '[.assets[].name | select(endswith(".tar.gz"))] | length'
+                --jq '[.assets[].name | select(test("^rehuman-[0-9].*\\.tar\\.gz$"))] | length'
             )"
             sha_count="$(
               gh release view "${tag}" \
@@ -134,8 +138,8 @@ jobs:
           gh release download "${tag}" \
             --repo "${GITHUB_REPOSITORY}" \
             --dir dist \
-            --pattern "*.whl" \
-            --pattern "*.tar.gz" \
+            --pattern "rehuman-[0-9]*.whl" \
+            --pattern "rehuman-[0-9]*.tar.gz" \
             --pattern "SHA256SUMS"
 
       - name: Validate wheel and sdist presence
@@ -146,8 +150,8 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
 
-          wheels=(dist/*.whl)
-          sdists=(dist/*.tar.gz)
+          wheels=(dist/rehuman-[0-9]*.whl)
+          sdists=(dist/rehuman-[0-9]*.tar.gz)
           checksums=(dist/SHA256SUMS)
 
           if (( ${#wheels[@]} < EXPECTED_WHEEL_COUNT )); then
@@ -216,7 +220,7 @@ jobs:
               re.compile(r"win_amd64\.whl$"),
           ]
 
-          for attempt in range(1, 11):
+          for attempt in range(1, 21):
               with urllib.request.urlopen(url, timeout=15) as response:
                   payload = json.load(response)
               releases = payload.get("releases", {})
@@ -232,13 +236,13 @@ jobs:
               if len(wheel_files) >= expected_wheels and has_sdist and has_all_wheel_variants:
                   print(f"Found complete rehuman {expected} publish on PyPI ({len(files)} files).")
                   break
-              if attempt == 10:
+              if attempt == 20:
                   raise SystemExit(
                       f"Expected complete rehuman {expected} publish on PyPI (>= {expected_wheels} wheels + sdist + all expected platforms)."
                   )
               print(
-                  f"Attempt {attempt}/10: rehuman {expected} publish incomplete "
+                  f"Attempt {attempt}/20: rehuman {expected} publish incomplete "
                   f"(wheels={len(wheel_files)}, sdist={has_sdist}, all_variants={has_all_wheel_variants}); retrying..."
               )
-              time.sleep(6)
+              time.sleep(10)
           PY
