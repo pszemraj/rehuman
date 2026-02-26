@@ -427,9 +427,28 @@ jobs:
         run: |
           set -euo pipefail
           rm -f dist/SHA256SUMS
-          LC_ALL=C ls -1 dist | LC_ALL=C sort | while read -r file; do
-            sha256sum "dist/${file}"
-          done > dist/SHA256SUMS
+          mapfile -t dist_files < <(
+            find dist -maxdepth 1 -type f ! -name "SHA256SUMS" -printf '%f\n' | LC_ALL=C sort
+          )
+          if (( ${#dist_files[@]} == 0 )); then
+            echo "::error::No distribution files found to hash in dist/."
+            exit 1
+          fi
+          (
+            cd dist
+            for file in "${dist_files[@]}"; do
+              sha256sum "${file}"
+            done
+          ) > dist/SHA256SUMS
+
+      - name: Verify generated SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd dist
+            sha256sum -c SHA256SUMS
+          )
 
       - name: Upload finalized dist artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
