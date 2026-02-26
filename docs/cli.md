@@ -1,5 +1,8 @@
 # CLI Guide
 
+This document is the canonical source for CLI behavior.
+For transformation semantics and option meanings at the library level, see [API Reference](api.md).
+
 rehuman ships two binaries:
 
 - `rehuman` - cleans input text
@@ -86,7 +89,7 @@ unicode_normalization = "nfkc"
 ```
 
 > [!TIP]
-> A ready-to-copy template lives in `config.example.toml` at the project root.
+> A ready-to-copy template lives in [`config.example.toml`](../config.example.toml) at the project root.
 
 ### File Size Limit
 

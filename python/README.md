@@ -2,7 +2,7 @@
 
 Python bindings for `rehuman` built with PyO3 + maturin.
 
-## Development Install
+## Install (Development)
 
 ```bash
 cd python
@@ -11,6 +11,13 @@ source .venv/bin/activate
 pip install -U pip maturin pytest
 maturin develop
 ```
+
+## Documentation
+
+Primary Python docs live in this package directory:
+
+- [python/docs/index.md](docs/index.md)
+- [python/docs/api.md](docs/api.md) (canonical Python API semantics)
 
 ## Quickstart
 
@@ -28,28 +35,6 @@ print(result.text)         # "Hithere"
 print(result.changes_made) # e.g. 3
 print(result.stats)        # dict with per-operation counters
 ```
-
-## API
-
-- `clean(text: str) -> str`
-- `humanize(text: str) -> str`
-- `Options(...)`
-- `Cleaner(options: Options | None = None)`
-- `CleaningResult`
-- `Options.code_safe_preset()` for docs/source-safe normalization defaults
-
-Module constants:
-
-- `HAS_STATS`: `bool`
-- `HAS_SECURITY`: `bool`
-- `__version__`: `str`
-
-## Features
-
-- Default Python build enables Rust features: `unorm`, `stats`.
-- Optional `security` feature is supported; when enabled:
-  - `Options(..., strip_bidi_controls=...)` is available.
-  - `CleaningResult.stats` may include `bidi_controls_removed`.
 
 ## Tests
 

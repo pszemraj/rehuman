@@ -1,5 +1,8 @@
 # API Reference
 
+This document is the canonical source for Rust library behavior (`rehuman` crate): defaults, options, presets, stats, and error handling.
+For CLI usage, see [CLI Guide](cli.md). For recipes, see [Examples](examples.md).
+
 ---
 
 - [API Reference](#api-reference)
@@ -20,12 +23,13 @@
 ```rust
 use rehuman::{clean, humanize};
 
-let basic = clean("Hi\u{200B}there");             // -> "Hi there"
+let basic = clean("Hi\u{200B}there");             // -> "Hithere"
 let fancy = humanize("“Quote”—and…more");         // -> "\"Quote\"-and...more"
 ```
 
 - `clean` applies the default preset (hidden character removal, spacing fixes) and emits keyboard-safe ASCII (emoji are dropped unless you opt out).
 - `humanize` applies the "humanize" preset (default preset + typographic normalization + whitespace collapsing).
+- In keyboard-only mode, non-ASCII characters are dropped (not transliterated). Example: `"Café"` becomes `"Caf"`.
 
 ## TextCleaner
 
@@ -164,7 +168,7 @@ println!("changes: {}", summary.changes_made);
 
 | Flag       | Default  | Description                                                                                                                               |
 | ---------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `unorm`    | enabled  | Enables Unicode normalization support via the `unicode-normalization` crate. If disabled, requesting normalization will panic at runtime. |
+| `unorm`    | enabled  | Enables Unicode normalization support via the `unicode-normalization` crate. If disabled, `try_*` APIs return an error and infallible `clean*` APIs panic when normalization is requested. |
 | `stats`    | enabled  | Collects per-change counters in the hot path. Disable to skip tracking overhead while keeping change detection accurate.                  |
 | `security` | disabled | Enables bidi-control stripping and related helpers (opt-in hardening).                                                                    |
 
