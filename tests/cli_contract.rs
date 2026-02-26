@@ -335,3 +335,53 @@ fn code_safe_preset_preserves_diagram_glyphs() {
         stderr_text(&code_safe_check)
     );
 }
+
+#[test]
+fn code_safe_preset_matches_explicit_safe_flags() {
+    let input = "├── docs/\n│   └── api.md\n“quoted” — text… 👍\n";
+
+    let preset = run_bin("rehuman", &["--preset", "code-safe"], Some(input));
+    assert!(preset.status.success(), "{}", stderr_text(&preset));
+
+    let explicit = run_bin(
+        "rehuman",
+        &[
+            "--keyboard-only",
+            "false",
+            "--normalize-dashes",
+            "false",
+            "--normalize-quotes",
+            "false",
+            "--normalize-other",
+            "false",
+        ],
+        Some(input),
+    );
+    assert!(explicit.status.success(), "{}", stderr_text(&explicit));
+
+    assert_eq!(stdout_text(&preset), stdout_text(&explicit));
+}
+
+#[test]
+fn explicit_flags_override_code_safe_preset() {
+    let diagram = "├── src/\n│   └── lib.rs\n";
+
+    let code_safe = run_bin("rehuman", &["--preset", "code-safe"], Some(diagram));
+    assert!(code_safe.status.success(), "{}", stderr_text(&code_safe));
+    assert_eq!(stdout_text(&code_safe), diagram);
+
+    let overridden = run_bin(
+        "rehuman",
+        &["--preset", "code-safe", "--keyboard-only", "true"],
+        Some(diagram),
+    );
+    assert!(overridden.status.success(), "{}", stderr_text(&overridden));
+    assert_ne!(stdout_text(&overridden), diagram);
+
+    let check = run_bin(
+        "ishuman",
+        &["--preset", "code-safe", "--keyboard-only", "true"],
+        Some(diagram),
+    );
+    assert_eq!(check.status.code(), Some(1), "{}", stderr_text(&check));
+}
