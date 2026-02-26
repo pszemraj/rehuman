@@ -9,9 +9,10 @@ use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
 
 use common::{
-    default_cli_options, default_config_path, load_config, parse_bool_flag, read_input,
-    validate_emoji_policy_dependency, write_stats, write_stats_json, EmojiPolicyArg,
-    LineEndingChoice, PartialOptions, StatsSummary, UnicodeNormalizationChoice, MAX_INPUT_BYTES,
+    default_cli_options, default_config_path, load_config, options_from_preset, parse_bool_flag,
+    read_input, validate_emoji_policy_dependency, write_stats, write_stats_json, EmojiPolicyArg,
+    LineEndingChoice, PartialOptions, PresetArg, StatsSummary, UnicodeNormalizationChoice,
+    MAX_INPUT_BYTES,
 };
 use rehuman::TextCleaner;
 
@@ -32,6 +33,10 @@ fn run() -> Result<i32> {
             options = load_config(path)
                 .with_context(|| format!("failed to read config at {}", path.display()))?;
         }
+    }
+
+    if let Some(preset) = cli.preset {
+        options = options_from_preset(preset);
     }
 
     let overrides = cli.to_partial_options();
@@ -73,6 +78,10 @@ struct Cli {
     /// Path to the input file. Reads from STDIN when omitted.
     #[arg(value_name = "INPUT")]
     input: Option<PathBuf>,
+
+    /// Apply a named preset (for example `code-safe` for docs/source text).
+    #[arg(long, value_enum)]
+    preset: Option<PresetArg>,
 
     /// Override remove_hidden behavior (true/false, default true)
     #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]

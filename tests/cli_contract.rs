@@ -294,3 +294,44 @@ fn stats_json_contract_is_consistent_between_bins() {
 
     assert_eq!(rehuman_json, ishuman_json);
 }
+
+#[test]
+fn code_safe_preset_preserves_diagram_glyphs() {
+    let diagram = "rehuman/\n├── src/\n│   └── lib.rs\n";
+
+    let default_clean = run_bin("rehuman", &[], Some(diagram));
+    assert!(
+        default_clean.status.success(),
+        "{}",
+        stderr_text(&default_clean)
+    );
+    assert_ne!(
+        stdout_text(&default_clean),
+        diagram,
+        "default keyboard-only mode should alter non-ASCII diagram glyphs"
+    );
+
+    let code_safe_clean = run_bin("rehuman", &["--preset", "code-safe"], Some(diagram));
+    assert!(
+        code_safe_clean.status.success(),
+        "{}",
+        stderr_text(&code_safe_clean)
+    );
+    assert_eq!(stdout_text(&code_safe_clean), diagram);
+
+    let default_check = run_bin("ishuman", &[], Some(diagram));
+    assert_eq!(
+        default_check.status.code(),
+        Some(1),
+        "{}",
+        stderr_text(&default_check)
+    );
+
+    let code_safe_check = run_bin("ishuman", &["--preset", "code-safe"], Some(diagram));
+    assert_eq!(
+        code_safe_check.status.code(),
+        Some(0),
+        "{}",
+        stderr_text(&code_safe_check)
+    );
+}

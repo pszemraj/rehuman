@@ -55,6 +55,8 @@ let cleaned = clean("Thanks 👍"); // -> "Thanks"
 ```
 
 By default, keyboard-only mode drops non-ASCII characters rather than transliterating them.
+For docs/source files where Unicode glyphs matter (for example box-drawing diagrams),
+use the CLI with `--preset code-safe` (or `--keyboard-only false`).
 For detailed semantics and option behavior, use the API reference links below.
 
 ## Documentation

@@ -50,6 +50,7 @@ rehuman --stream < huge.log > huge.clean.log
 
 | Flag                             | Description                                                      |
 | -------------------------------- | ---------------------------------------------------------------- |
+| `--preset <name>`                | Apply named baseline options: `minimal`, `balanced`, `humanize`, `aggressive`, `code-safe` |
 | `--keyboard-only=<bool>`         | Restrict output to ASCII keyboard chars (default `true` for CLI) |
 | `--keep-emoji`                   | Keep emoji even when keyboard-only is active                     |
 | `--unicode-normalization <mode>` | One of `none`, `nfd`, `nfc`, `nfkd`, `nfkc`                      |
@@ -70,6 +71,30 @@ Additional boolean overrides accepted by both tools:
 - `--collapse-whitespace`
 
 Each also accepts explicit values (`true/false`, `1/0`, `yes/no`, `on/off`).
+
+### Presets
+
+Available preset names:
+
+- `minimal`
+- `balanced`
+- `humanize`
+- `aggressive`
+- `code-safe`
+
+`code-safe` is intended for docs/source-like text where non-ASCII glyphs and
+literal punctuation should be preserved (for example Unicode box-drawing diagrams).
+
+Preset precedence:
+
+- Config is loaded first.
+- `--preset` replaces the baseline options.
+- Explicit option flags (for example `--keyboard-only false`) apply last.
+
+For bulk cleanup of Markdown/code/docs files:
+
+- preferred: `--preset code-safe`
+- fallback: `--keyboard-only false`
 
 ### Processing Modes
 

@@ -22,6 +22,57 @@ pub const MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
 /// Version identifier for on-disk config schema.
 pub const CONFIG_VERSION: u32 = 1;
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+#[value(rename_all = "kebab_case")]
+/// Named option presets for CLI workflows.
+pub enum PresetArg {
+    Minimal,
+    Balanced,
+    Humanize,
+    Aggressive,
+    CodeSafe,
+}
+
+/// Build options for a named preset.
+///
+/// # Arguments
+/// - `preset`: Preset variant selected by the user.
+///
+/// # Returns
+/// A full [`CleaningOptions`] value for the selected preset.
+pub fn options_from_preset(preset: PresetArg) -> CleaningOptions {
+    match preset {
+        PresetArg::Minimal => CleaningOptions::minimal(),
+        PresetArg::Balanced => CleaningOptions::balanced(),
+        PresetArg::Humanize => CleaningOptions::humanize(),
+        PresetArg::Aggressive => CleaningOptions::aggressive(),
+        PresetArg::CodeSafe => code_safe_options(),
+    }
+}
+
+/// Build the code-safe preset used for docs/source-style content.
+///
+/// # Returns
+/// A preset that keeps non-ASCII glyphs and avoids semantic rewrites.
+pub fn code_safe_options() -> CleaningOptions {
+    let builder = CleaningOptions::builder()
+        .remove_hidden(true)
+        .remove_trailing_whitespace(true)
+        .normalize_spaces(true)
+        .normalize_dashes(false)
+        .normalize_quotes(false)
+        .normalize_other(false)
+        .keyboard_only(false)
+        .emoji_policy(EmojiPolicy::Keep)
+        .remove_control_chars(true)
+        .collapse_whitespace(false)
+        .normalize_line_endings(None)
+        .unicode_normalization(UnicodeNormalizationMode::None);
+    #[cfg(feature = "security")]
+    let builder = builder.strip_bidi_controls(false);
+    builder.build()
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 /// CLI/config representation of emoji handling policy.
