@@ -11,21 +11,26 @@ Automation is tag/release-driven and supports both automatic and manual runs.
 Workflow: `.github/workflows/python-release-artifacts.yml`
 
 - Auto trigger: GitHub Release `published`
-- Manual trigger: `workflow_dispatch` with required `tag`
+- Manual trigger: `workflow_dispatch` with either:
+  - `tag` (release asset upload path), or
+  - `test_mode=true` and `ref=<branch-or-ref>` (dry-run build path)
 
 Behavior:
 
 - Resolves tags in either format: `vX.Y.Z` or `X.Y.Z`
-- Fails early if the tag does not exist or the corresponding GitHub release is missing
+- In release-upload mode, fails early if the tag does not exist or the corresponding GitHub release is missing
 - Validates tag version against:
   - root `Cargo.toml` package version
   - `python/Cargo.toml` package version
   - `python/pyproject.toml` project name (`rehuman`)
+- In `test_mode`, validates root/python version sync and package name on the selected ref
 - Builds and uploads release artifacts:
   - Wheels for Linux/macOS/Windows matrix
   - One source distribution (`sdist`)
   - Deterministic `SHA256SUMS`
-- Re-run behavior: assets are replaced (`gh release upload --clobber`)
+- Re-run behavior:
+  - release-upload mode: assets are replaced (`gh release upload --clobber`)
+  - test mode: artifacts are published only to the workflow run (`dist-final`)
 
 ### Workflow 2: Publish to PyPI
 
@@ -85,6 +90,13 @@ Build/re-attach release artifacts for existing tag:
 - Dispatch `python-release-artifacts.yml`
 - Input `tag: v0.1.2` (or `0.1.2`)
 
+Dry-run build on a branch without uploading release assets:
+
+- Dispatch `python-release-artifacts.yml`
+- Input `test_mode: true`
+- Input `ref: feat/builds` (or another branch/ref)
+- Leave `tag` empty
+
 Re-publish existing release artifacts to PyPI (idempotent):
 
 - Dispatch `python-pypi-publish.yml`
@@ -94,6 +106,7 @@ Re-publish existing release artifacts to PyPI (idempotent):
 ## Troubleshooting
 
 - `No tag found`: ensure tag exists in repo and matches input spelling
+- `Provide a tag, or run with test_mode=true and a valid ref input`: supply `tag` for release mode, or `test_mode + ref` for dry-run mode
 - `No release found`: create/publish GitHub Release for the tag first
 - Version mismatch errors: sync versions in root and `python/` Cargo manifests
 - `No wheel/sdist assets`: run the artifact workflow before publish workflow

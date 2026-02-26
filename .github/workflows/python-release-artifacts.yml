@@ -7,8 +7,17 @@ on:
     inputs:
       tag:
         description: "Release tag to build artifacts for (e.g. v0.1.2 or 0.1.2)"
-        required: true
+        required: false
         type: string
+      ref:
+        description: "Git ref to build in test_mode when no tag is provided (e.g. feat/builds)"
+        required: false
+        type: string
+      test_mode:
+        description: "Build and validate artifacts without uploading to GitHub Release"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -20,6 +29,8 @@ jobs:
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
+      checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
+      test_mode: ${{ steps.resolve.outputs.test_mode }}
     steps:
       - name: Checkout repository with tags
         uses: actions/checkout@v4
@@ -32,44 +43,62 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_TEST_MODE: ${{ inputs.test_mode }}
         run: |
           set -euo pipefail
 
+          resolved_tag=""
+          version=""
+          checkout_ref=""
+
           if [[ "${EVENT_NAME}" == "release" ]]; then
             raw_tag="${RELEASE_TAG}"
+            test_mode="false"
           else
             raw_tag="${INPUT_TAG}"
+            test_mode="${INPUT_TEST_MODE}"
           fi
 
-          if [[ -z "${raw_tag}" ]]; then
-            echo "::error::No tag provided."
-            exit 1
-          fi
-
-          candidates=()
-          if [[ "${raw_tag}" == v* ]]; then
-            candidates+=("${raw_tag}" "${raw_tag#v}")
-          else
-            candidates+=("v${raw_tag}" "${raw_tag}")
-          fi
-
-          resolved_tag=""
-          for candidate in "${candidates[@]}"; do
-            if git rev-parse -q --verify "refs/tags/${candidate}" >/dev/null; then
-              resolved_tag="${candidate}"
-              break
+          if [[ -n "${raw_tag}" ]]; then
+            candidates=()
+            if [[ "${raw_tag}" == v* ]]; then
+              candidates+=("${raw_tag}" "${raw_tag#v}")
+            else
+              candidates+=("v${raw_tag}" "${raw_tag}")
             fi
-          done
 
-          if [[ -z "${resolved_tag}" ]]; then
-            echo "::error::Tag '${raw_tag}' does not exist in ${GITHUB_REPOSITORY}."
+            for candidate in "${candidates[@]}"; do
+              if git rev-parse -q --verify "refs/tags/${candidate}" >/dev/null; then
+                resolved_tag="${candidate}"
+                checkout_ref="refs/tags/${candidate}"
+                version="${candidate#v}"
+                break
+              fi
+            done
+
+            if [[ -z "${resolved_tag}" ]]; then
+              echo "::error::Tag '${raw_tag}' does not exist in ${GITHUB_REPOSITORY}."
+              exit 1
+            fi
+          elif [[ "${test_mode}" == "true" && -n "${INPUT_REF}" ]]; then
+            if ! git rev-parse -q --verify "${INPUT_REF}^{commit}" >/dev/null; then
+              echo "::error::Ref '${INPUT_REF}' does not exist."
+              exit 1
+            fi
+            checkout_ref="${INPUT_REF}"
+          else
+            echo "::error::Provide a tag, or run with test_mode=true and a valid ref input."
             exit 1
           fi
 
           echo "tag=${resolved_tag}" >>"${GITHUB_OUTPUT}"
-          echo "version=${resolved_tag#v}" >>"${GITHUB_OUTPUT}"
+          echo "version=${version}" >>"${GITHUB_OUTPUT}"
+          echo "checkout_ref=${checkout_ref}" >>"${GITHUB_OUTPUT}"
+          echo "test_mode=${test_mode}" >>"${GITHUB_OUTPUT}"
 
       - name: Verify GitHub release exists for tag
+        if: ${{ steps.resolve.outputs.test_mode != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -79,15 +108,16 @@ jobs:
       - name: Verify root/python versions and PyPI package name
         env:
           EXPECTED_VERSION: ${{ steps.resolve.outputs.version }}
+          CHECKOUT_REF: ${{ steps.resolve.outputs.checkout_ref }}
         run: |
           set -euo pipefail
-          git checkout --detach "refs/tags/${{ steps.resolve.outputs.tag }}"
+          git checkout --detach "${CHECKOUT_REF}"
           python - <<'PY'
           import os
           import sys
           import tomllib
 
-          expected = os.environ["EXPECTED_VERSION"]
+          expected = os.environ.get("EXPECTED_VERSION", "")
 
           with open("Cargo.toml", "rb") as f:
               root = tomllib.load(f)
@@ -101,9 +131,11 @@ jobs:
           pypi_name = pyproject["project"]["name"]
 
           errors = []
-          if root_version != expected:
+          if root_version != py_version:
+              errors.append(f"root Cargo.toml version {root_version!r} != python/Cargo.toml version {py_version!r}")
+          if expected and root_version != expected:
               errors.append(f"root Cargo.toml version {root_version!r} != tag version {expected!r}")
-          if py_version != expected:
+          if expected and py_version != expected:
               errors.append(f"python/Cargo.toml version {py_version!r} != tag version {expected!r}")
           if pypi_name != "rehuman":
               errors.append(f"python/pyproject.toml project.name {pypi_name!r} != 'rehuman'")
@@ -155,7 +187,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ needs.resolve-tag.outputs.tag }}
+          ref: ${{ needs.resolve-tag.outputs.checkout_ref }}
 
       - name: Set up Python (Windows)
         if: runner.os == 'Windows'
@@ -222,7 +254,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ needs.resolve-tag.outputs.tag }}
+          ref: ${{ needs.resolve-tag.outputs.checkout_ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -253,8 +285,8 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
-  upload-release-assets:
-    name: Upload Assets to GitHub Release
+  finalize-artifacts:
+    name: Finalize Artifacts
     needs: [resolve-tag, build-wheels, build-sdist]
     runs-on: ubuntu-latest
     steps:
@@ -298,7 +330,16 @@ jobs:
             sha256sum "dist/${file}"
           done > dist/SHA256SUMS
 
+      - name: Upload finalized dist artifact (test mode)
+        if: ${{ needs.resolve-tag.outputs.test_mode == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-final
+          path: dist/*
+          if-no-files-found: error
+
       - name: Upload artifacts to GitHub release
+        if: ${{ needs.resolve-tag.outputs.test_mode != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
