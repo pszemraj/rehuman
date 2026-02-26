@@ -8,6 +8,32 @@ use rehuman::{
     UnicodeNormalizationMode,
 };
 
+fn format_emoji_policy(policy: EmojiPolicy) -> &'static str {
+    match policy {
+        EmojiPolicy::Drop => "drop",
+        EmojiPolicy::Keep => "keep",
+    }
+}
+
+fn format_line_endings(style: Option<LineEndingStyle>) -> &'static str {
+    match style {
+        None => "auto",
+        Some(LineEndingStyle::Lf) => "lf",
+        Some(LineEndingStyle::Crlf) => "crlf",
+        Some(LineEndingStyle::Cr) => "cr",
+    }
+}
+
+fn format_unicode_normalization(mode: UnicodeNormalizationMode) -> &'static str {
+    match mode {
+        UnicodeNormalizationMode::None => "none",
+        UnicodeNormalizationMode::NFD => "nfd",
+        UnicodeNormalizationMode::NFC => "nfc",
+        UnicodeNormalizationMode::NFKD => "nfkd",
+        UnicodeNormalizationMode::NFKC => "nfkc",
+    }
+}
+
 fn parse_unicode_normalization(value: &str) -> PyResult<UnicodeNormalizationMode> {
     match value.to_ascii_lowercase().as_str() {
         "none" => Ok(UnicodeNormalizationMode::None),
@@ -72,7 +98,7 @@ fn humanize(text: &str) -> String {
     rehuman::humanize(text).text.into_owned()
 }
 
-#[pyclass(from_py_object)]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 /// Result returned by `Cleaner.clean`.
 ///
@@ -90,6 +116,12 @@ struct CleaningResult {
 
 #[pymethods]
 impl CleaningResult {
+    fn __eq__(&self, other: PyRef<'_, CleaningResult>) -> bool {
+        self.text == other.text
+            && self.changes_made == other.changes_made
+            && self.stats_inner == other.stats_inner
+    }
+
     #[getter]
     /// Per-operation counters as `dict[str, int]`.
     fn stats<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
@@ -116,7 +148,7 @@ impl CleaningResult {
     }
 }
 
-#[pyclass(from_py_object)]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 /// Cleaning options used by `Cleaner`.
 ///
@@ -315,8 +347,8 @@ impl Options {
                 "Options(",
                 "remove_hidden={}, remove_trailing_whitespace={}, normalize_spaces={}, ",
                 "normalize_dashes={}, normalize_quotes={}, normalize_other={}, ",
-                "keyboard_only={}, emoji_policy={:?}, remove_control_chars={}, ",
-                "collapse_whitespace={}, line_endings={:?}, unicode_normalization={:?}",
+                "keyboard_only={}, emoji_policy='{}', remove_control_chars={}, ",
+                "collapse_whitespace={}, line_endings='{}', unicode_normalization='{}'",
                 "{})"
             ),
             o.remove_hidden,
@@ -326,11 +358,11 @@ impl Options {
             o.normalize_quotes,
             o.normalize_other,
             o.keyboard_only,
-            o.emoji_policy,
+            format_emoji_policy(o.emoji_policy),
             o.remove_control_chars,
             o.collapse_whitespace,
-            o.normalize_line_endings,
-            o.unicode_normalization,
+            format_line_endings(o.normalize_line_endings),
+            format_unicode_normalization(o.unicode_normalization),
             security
         )
     }
@@ -349,8 +381,10 @@ impl Cleaner {
     #[new]
     #[pyo3(signature = (options = None))]
     /// Build a cleaner with optional `Options`.
-    fn new(options: Option<Options>) -> Self {
-        let inner_options = options.map(|options| options.inner).unwrap_or_default();
+    fn new(options: Option<PyRef<'_, Options>>) -> Self {
+        let inner_options = options
+            .map(|options| options.inner.clone())
+            .unwrap_or_default();
         Self {
             inner: TextCleaner::new(inner_options),
         }

@@ -106,8 +106,8 @@ def test_line_endings_lf() -> None:
     assert result.text == "a\nb\nc\n"
 
 
-def test_unicode_normalization_nfkc() -> None:
-    """NFKC normalization composes decomposed characters."""
+def test_unorm_is_available_by_default() -> None:
+    """Default bindings build includes `unorm` and composes decomposed chars."""
     options = rehuman.Options(keyboard_only=False, unicode_normalization="nfkc")
     result = rehuman.Cleaner(options).clean("e\u0301")
     assert result.text == "\u00e9"
@@ -130,10 +130,30 @@ def test_presets_minimal_balanced_humanize_aggressive() -> None:
 def test_code_safe_preset_preserves_source_like_text() -> None:
     """Code-safe preset avoids semantic text rewrites."""
     code_safe = rehuman.Cleaner(rehuman.Options.code_safe_preset())
+    # Keep a literal Rust escape token (`\\u{00A0}`), not the NBSP codepoint.
     source_like = 'let input = "“Hello — world…”\\u{00A0}😀";'
     result = code_safe.clean(source_like)
     assert result.text == source_like
     assert result.changes_made == 0
+
+
+def test_options_repr_and_result_equality_are_value_based() -> None:
+    """Options repr and CleaningResult equality use Python-facing value semantics."""
+    options = rehuman.Options(
+        keep_emoji=True,
+        keyboard_only=True,
+        unicode_normalization="nfkc",
+        line_endings="lf",
+    )
+    options_repr = repr(options)
+    assert "emoji_policy='keep'" in options_repr
+    assert "line_endings='lf'" in options_repr
+    assert "unicode_normalization='nfkc'" in options_repr
+
+    cleaner = rehuman.Cleaner(options)
+    left = cleaner.clean("e\u0301 👍")
+    right = cleaner.clean("e\u0301 👍")
+    assert left == right
 
 
 def test_code_safe_preset_removes_hidden_and_control_chars() -> None:

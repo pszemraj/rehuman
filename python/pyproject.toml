@@ -31,6 +31,7 @@ Documentation = "https://docs.rs/rehuman"
 [tool.maturin]
 module-name = "rehuman._rehuman"
 python-source = "."
+exclude = ["tests/**", "docs/**"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

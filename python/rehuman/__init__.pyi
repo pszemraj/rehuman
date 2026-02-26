@@ -25,7 +25,11 @@ class CleaningResult:
     def stats(self) -> dict[str, int]: ...
 
 class Options:
-    """Configuration object for ``Cleaner``."""
+    """Configuration object for ``Cleaner``.
+
+    ``strip_bidi_controls`` is conditionally available at runtime only when
+    ``rehuman.HAS_SECURITY`` is ``True``.
+    """
 
     def __init__(
         self,
@@ -42,7 +46,6 @@ class Options:
         collapse_whitespace: bool = ...,
         line_endings: str | None = ...,
         unicode_normalization: str = ...,
-        strip_bidi_controls: bool = ...,
     ) -> None: ...
     @staticmethod
     def minimal_preset() -> Options: ...
