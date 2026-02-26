@@ -1,0 +1,146 @@
+name: Python Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish from (e.g. v0.1.1 or 0.1.1)"
+        required: true
+        type: string
+      allow_prerelease:
+        description: "Allow manual publish of prerelease tags"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    name: Publish release artifacts to PyPI
+    if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release tag and prerelease state
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+          INPUT_TAG: ${{ inputs.tag }}
+          ALLOW_PRERELEASE: ${{ inputs.allow_prerelease }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          resolved_tag=""
+          prerelease="false"
+
+          if [[ "${EVENT_NAME}" == "release" ]]; then
+            resolved_tag="${RELEASE_TAG}"
+            prerelease="${RELEASE_PRERELEASE}"
+          else
+            raw_tag="${INPUT_TAG}"
+            if [[ -z "${raw_tag}" ]]; then
+              echo "::error::workflow_dispatch requires a tag input."
+              exit 1
+            fi
+
+            candidates=()
+            if [[ "${raw_tag}" == v* ]]; then
+              candidates+=("${raw_tag}" "${raw_tag#v}")
+            else
+              candidates+=("v${raw_tag}" "${raw_tag}")
+            fi
+
+            # For manual runs we detect prerelease from GitHub Release metadata.
+            for candidate in "${candidates[@]}"; do
+              if result="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${candidate}" --jq '.tag_name + "|" + (.prerelease|tostring)' 2>/dev/null)"; then
+                IFS='|' read -r resolved_tag prerelease <<<"${result}"
+                break
+              fi
+            done
+
+            if [[ -z "${resolved_tag}" ]]; then
+              echo "::error::No GitHub release found for '${raw_tag}'."
+              exit 1
+            fi
+
+            if [[ "${prerelease}" == "true" && "${ALLOW_PRERELEASE}" != "true" ]]; then
+              echo "::error::Tag '${resolved_tag}' is prerelease; rerun with allow_prerelease=true to publish manually."
+              exit 1
+            fi
+          fi
+
+          echo "tag=${resolved_tag}" >>"${GITHUB_OUTPUT}"
+          echo "version=${resolved_tag#v}" >>"${GITHUB_OUTPUT}"
+          echo "prerelease=${prerelease}" >>"${GITHUB_OUTPUT}"
+
+      - name: Download release distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "${{ steps.resolve.outputs.tag }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir dist \
+            --pattern "*.whl" \
+            --pattern "*.tar.gz"
+
+      - name: Validate wheel and sdist presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+
+          if (( ${#wheels[@]} == 0 )); then
+            echo "::error::No wheel assets found in GitHub release '${{ steps.resolve.outputs.tag }}'."
+            exit 1
+          fi
+          if (( ${#sdists[@]} == 0 )); then
+            echo "::error::No sdist asset found in GitHub release '${{ steps.resolve.outputs.tag }}'."
+            exit 1
+          fi
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+          print-hash: true
+
+      - name: Verify published version exists on PyPI
+        env:
+          EXPECTED_VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.request
+
+          expected = os.environ["EXPECTED_VERSION"]
+          url = "https://pypi.org/pypi/rehuman/json"
+
+          for attempt in range(1, 11):
+              with urllib.request.urlopen(url, timeout=15) as response:
+                  payload = json.load(response)
+              releases = payload.get("releases", {})
+              files = releases.get(expected, [])
+              if files:
+                  print(f"Found rehuman {expected} on PyPI ({len(files)} files).")
+                  break
+              if attempt == 10:
+                  raise SystemExit(f"Expected rehuman {expected} to exist on PyPI after publish.")
+              print(f"Attempt {attempt}/10: rehuman {expected} not visible on PyPI yet; retrying...")
+              time.sleep(6)
+          PY

@@ -5,6 +5,7 @@ This directory is the source of truth for Python package documentation (`import 
 ## Docs Map
 
 - [API Reference](api.md): functions, classes, presets, constants, and errors.
+- [Release Automation](release.md): wheel/sdist release assets and PyPI publish flows.
 
 ## Quick Start
 

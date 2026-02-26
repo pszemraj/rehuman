@@ -1,0 +1,308 @@
+name: Python Release Artifacts
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build artifacts for (e.g. v0.1.1 or 0.1.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-tag:
+    name: Resolve Tag and Validate Versions
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Checkout repository with tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "release" ]]; then
+            raw_tag="${RELEASE_TAG}"
+          else
+            raw_tag="${INPUT_TAG}"
+          fi
+
+          if [[ -z "${raw_tag}" ]]; then
+            echo "::error::No tag provided."
+            exit 1
+          fi
+
+          candidates=()
+          if [[ "${raw_tag}" == v* ]]; then
+            candidates+=("${raw_tag}" "${raw_tag#v}")
+          else
+            candidates+=("v${raw_tag}" "${raw_tag}")
+          fi
+
+          resolved_tag=""
+          for candidate in "${candidates[@]}"; do
+            if git rev-parse -q --verify "refs/tags/${candidate}" >/dev/null; then
+              resolved_tag="${candidate}"
+              break
+            fi
+          done
+
+          if [[ -z "${resolved_tag}" ]]; then
+            echo "::error::Tag '${raw_tag}' does not exist in ${GITHUB_REPOSITORY}."
+            exit 1
+          fi
+
+          echo "tag=${resolved_tag}" >>"${GITHUB_OUTPUT}"
+          echo "version=${resolved_tag#v}" >>"${GITHUB_OUTPUT}"
+
+      - name: Verify GitHub release exists for tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "${{ steps.resolve.outputs.tag }}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+
+      - name: Verify root/python versions and PyPI package name
+        env:
+          EXPECTED_VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          git checkout --detach "refs/tags/${{ steps.resolve.outputs.tag }}"
+          python - <<'PY'
+          import os
+          import sys
+          import tomllib
+
+          expected = os.environ["EXPECTED_VERSION"]
+
+          with open("Cargo.toml", "rb") as f:
+              root = tomllib.load(f)
+          with open("python/Cargo.toml", "rb") as f:
+              py_cargo = tomllib.load(f)
+          with open("python/pyproject.toml", "rb") as f:
+              pyproject = tomllib.load(f)
+
+          root_version = root["package"]["version"]
+          py_version = py_cargo["package"]["version"]
+          pypi_name = pyproject["project"]["name"]
+
+          errors = []
+          if root_version != expected:
+              errors.append(f"root Cargo.toml version {root_version!r} != tag version {expected!r}")
+          if py_version != expected:
+              errors.append(f"python/Cargo.toml version {py_version!r} != tag version {expected!r}")
+          if pypi_name != "rehuman":
+              errors.append(f"python/pyproject.toml project.name {pypi_name!r} != 'rehuman'")
+
+          if errors:
+              print("::error::Version/package integrity check failed:", file=sys.stderr)
+              for error in errors:
+                  print(f"::error::{error}", file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
+  build-wheels:
+    name: Build Wheel (${{ matrix.platform.name }})
+    needs: resolve-tag
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: auto
+            smoke_install: true
+            run_pytest: true
+          - name: linux-aarch64
+            runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            manylinux: auto
+            smoke_install: false
+            run_pytest: false
+          - name: macos-x86_64
+            runner: macos-13
+            target: x86_64-apple-darwin
+            smoke_install: true
+            run_pytest: false
+          - name: macos-arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            smoke_install: true
+            run_pytest: false
+          - name: windows-x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            python_arch: x64
+            smoke_install: true
+            run_pytest: false
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.resolve-tag.outputs.tag }}
+
+      - name: Set up Python (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          architecture: ${{ matrix.platform.python_arch }}
+
+      - name: Set up Python (non-Windows)
+        if: runner.os != 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build wheels (Linux)
+        if: runner.os == 'Linux'
+        uses: PyO3/maturin-action@0629f00e5704e5295af04df4238c070808aa1e96 # v1
+        with:
+          target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux }}
+          # maturin-action doesn't have a manifest-path input; pass -m via args.
+          args: --release --strip -m python/Cargo.toml --out dist
+
+      - name: Build wheels (non-Linux)
+        if: runner.os != 'Linux'
+        uses: PyO3/maturin-action@0629f00e5704e5295af04df4238c070808aa1e96 # v1
+        with:
+          target: ${{ matrix.platform.target }}
+          # maturin-action doesn't have a manifest-path input; pass -m via args.
+          args: --release --strip -m python/Cargo.toml --out dist
+
+      - name: Smoke test wheel import
+        if: matrix.platform.smoke_install == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python - <<'PY'
+          import rehuman
+          print(rehuman.__version__)
+          PY
+
+      - name: Run Python binding tests against built wheel
+        if: matrix.platform.run_pytest == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install pytest
+          python -m pytest -q python/tests
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.name }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  build-sdist:
+    name: Build and Verify sdist
+    needs: resolve-tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.resolve-tag.outputs.tag }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@0629f00e5704e5295af04df4238c070808aa1e96 # v1
+        with:
+          command: sdist
+          args: -m python/Cargo.toml --out dist
+
+      - name: Verify sdist install and import
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.tar.gz
+          python - <<'PY'
+          import rehuman
+          print(rehuman.__version__)
+          PY
+
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  upload-release-assets:
+    name: Upload Assets to GitHub Release
+    needs: [resolve-tag, build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Validate distribution set
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+
+          if (( ${#wheels[@]} == 0 )); then
+            echo "::error::No wheel files found in dist/."
+            exit 1
+          fi
+          if (( ${#sdists[@]} == 0 )); then
+            echo "::error::No sdist file found in dist/."
+            exit 1
+          fi
+
+      - name: Generate deterministic SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f dist/SHA256SUMS
+          LC_ALL=C ls -1 dist | LC_ALL=C sort | while read -r file; do
+            sha256sum "dist/${file}"
+          done > dist/SHA256SUMS
+
+      - name: Upload artifacts to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ needs.resolve-tag.outputs.tag }}" dist/* \
+            --clobber \
+            --repo "${GITHUB_REPOSITORY}"
