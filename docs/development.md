@@ -5,9 +5,10 @@
 > [!TIP]
 > Interested in seeing a feature sooner? Open a request at [GitHub Issues](https://github.com/pszemraj/rehuman/issues/new/choose).
 
-- [ ] International keyboard mode with a curated non-ASCII allowlist (€, £, §, …)
-- [ ] Optional transliteration when dropping non-ASCII characters in keyboard-only mode
-- [ ] Toggle to preserve join controls and handle additional ellipsis variants
+- [ ] Expand transliteration coverage and tune script-specific mappings beyond Latin-focused defaults
+- [ ] Extend `extended_keyboard` coverage with script-specific opt-in profiles
+- [ ] Tune preset-level defaults for `preserve_joiners` in script-sensitive contexts
+- [ ] Handle additional ellipsis/compatibility punctuation variants
 - [ ] Automated Unicode data refresh (script + CI)
 - [ ] Benchmark suite (contributions welcome)
 
@@ -18,10 +19,12 @@
   [Nordth](https://github.com/Nordth).
 - Unicode-derived tables are generated at build time; no network traffic occurs at runtime.
 
-## Documentation Ownership
+## Documentation Map
 
 - Rust library semantics: [API Reference](api.md)
 - CLI behavior and flags: [CLI Guide](cli.md)
 - Rust usage recipes: [Examples](examples.md)
 - Python package docs: [python/docs/index.md](../python/docs/index.md)
+- Python release automation + PyPI flow: [python/docs/release.md](../python/docs/release.md)
+- Manual CLI smoke-test workflow: [docs/dev/smoke-tests.md](dev/smoke-tests.md)
 - Rust file-size exceptions: [docs/dev/loc-exceptions.toml](dev/loc-exceptions.toml)

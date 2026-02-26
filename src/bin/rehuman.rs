@@ -12,10 +12,12 @@ use clap::{ArgAction, Parser};
 use tempfile::NamedTempFile;
 
 use common::{
-    clean_stream, default_cli_options, default_config_path, load_config, parse_bool_flag,
-    read_input, save_config, validate_emoji_policy_dependency, write_output, write_stats,
-    write_stats_json, ConfigFile, EmojiPolicyArg, LineEndingChoice, PartialOptions,
-    SerializableOptions, StatsSummary, UnicodeNormalizationChoice, CONFIG_VERSION, MAX_INPUT_BYTES,
+    clean_stream, default_cli_options, default_config_path, load_config, options_from_preset,
+    parse_bool_flag, read_input, save_config, validate_emoji_policy_dependency,
+    validate_extended_keyboard_dependency, validate_non_ascii_policy_dependency, write_output,
+    write_stats, write_stats_json, ConfigFile, EmojiPolicyArg, LineEndingChoice, NonAsciiPolicyArg,
+    PartialOptions, PresetArg, SerializableOptions, StatsSummary, UnicodeNormalizationChoice,
+    CONFIG_VERSION, MAX_INPUT_BYTES,
 };
 use rehuman::{CleaningResult, TextCleaner};
 
@@ -46,9 +48,15 @@ fn main() -> Result<()> {
         }
     }
 
+    if let Some(preset) = cli.preset {
+        options = options_from_preset(preset);
+    }
+
     let overrides = cli.to_partial_options();
     overrides.apply_to(&mut options);
     validate_emoji_policy_dependency(&options, cli.keep_emoji || cli.emoji_policy.is_some())?;
+    validate_non_ascii_policy_dependency(&options, cli.non_ascii_policy.is_some())?;
+    validate_extended_keyboard_dependency(&options, cli.extended_keyboard.is_some())?;
 
     if cli.save_config {
         if let Some(ref path) = config_path {
@@ -183,6 +191,10 @@ struct Cli {
     #[arg(value_name = "INPUT")]
     input: Option<PathBuf>,
 
+    /// Apply a named preset (for example `code-safe` for docs/source text).
+    #[arg(long, value_enum)]
+    preset: Option<PresetArg>,
+
     /// Override remove_hidden behavior (true/false, default true)
     #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
     remove_hidden: Option<bool>,
@@ -211,6 +223,10 @@ struct Cli {
     #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
     keyboard_only: Option<bool>,
 
+    /// Allow a curated non-ASCII keyboard allowlist in keyboard-only mode.
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    extended_keyboard: Option<bool>,
+
     /// Allow emoji to pass through even when keyboard_only is enabled
     #[arg(long, action = ArgAction::SetTrue, conflicts_with = "emoji_policy")]
     keep_emoji: bool,
@@ -218,6 +234,14 @@ struct Cli {
     /// Explicit emoji policy (drop or keep)
     #[arg(long, value_enum)]
     emoji_policy: Option<EmojiPolicyArg>,
+
+    /// Non-ASCII handling in keyboard-only mode (drop/fold/transliterate).
+    #[arg(long, value_enum)]
+    non_ascii_policy: Option<NonAsciiPolicyArg>,
+
+    /// Preserve ZWJ/ZWNJ joiners even when hidden characters are removed.
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    preserve_joiners: Option<bool>,
 
     /// Override remove_control_chars behavior (true/false, default true)
     #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
@@ -300,7 +324,10 @@ impl Cli {
             normalize_quotes: self.normalize_quotes,
             normalize_other: self.normalize_other,
             keyboard_only: self.keyboard_only,
+            extended_keyboard: self.extended_keyboard,
             emoji_policy: None,
+            non_ascii_policy: self.non_ascii_policy,
+            preserve_joiners: self.preserve_joiners,
             remove_control_chars: self.remove_control_chars,
             collapse_whitespace: self.collapse_whitespace,
             line_endings: self.line_endings,
@@ -352,6 +379,41 @@ mod tests {
             &options,
             cli.keep_emoji || cli.emoji_policy.is_some(),
         );
+        assert!(check.is_err(), "dependency check should fail");
+    }
+
+    #[test]
+    fn non_ascii_policy_requires_keyboard_mode_when_explicit() {
+        let cli = Cli::try_parse_from([
+            "rehuman",
+            "--keyboard-only",
+            "false",
+            "--non-ascii-policy",
+            "transliterate",
+            "input.txt",
+        ])
+        .expect("args should parse");
+        let mut options = default_cli_options();
+        cli.to_partial_options().apply_to(&mut options);
+        let check = validate_non_ascii_policy_dependency(&options, cli.non_ascii_policy.is_some());
+        assert!(check.is_err(), "dependency check should fail");
+    }
+
+    #[test]
+    fn extended_keyboard_requires_keyboard_mode_when_explicit() {
+        let cli = Cli::try_parse_from([
+            "rehuman",
+            "--keyboard-only",
+            "false",
+            "--extended-keyboard",
+            "true",
+            "input.txt",
+        ])
+        .expect("args should parse");
+        let mut options = default_cli_options();
+        cli.to_partial_options().apply_to(&mut options);
+        let check =
+            validate_extended_keyboard_dependency(&options, cli.extended_keyboard.is_some());
         assert!(check.is_err(), "dependency check should fail");
     }
 }

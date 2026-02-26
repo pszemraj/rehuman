@@ -1,32 +1,15 @@
 # Python Docs
 
-This directory is the source of truth for Python package documentation (`import rehuman`).
+Python package documentation for `import rehuman`.
 
 ## Docs Map
 
 - [API Reference](api.md): functions, classes, presets, constants, and errors.
+- [Release Automation](release.md): wheel/sdist release assets and PyPI publish flows.
+- [Package README](../README.md): local install, quickstart, and test commands.
 
-## Quick Start
+## Common Tasks
 
-```python
-import rehuman
-
-print(rehuman.clean("“Hello”—world…"))  # '"Hello"-world...'
-
-cleaner = rehuman.Cleaner(rehuman.Options.code_safe_preset())
-result = cleaner.clean('let input = "“Hello — world…”";')
-print(result.text)
-print(result.changes_made)
-print(result.stats)
-```
-
-## Local Build & Test
-
-```bash
-cd python
-python -m venv .venv
-source .venv/bin/activate
-pip install -U pip maturin pytest
-maturin develop
-pytest -q
-```
+- Compare `clean()` vs `humanize()`: [API comparison](api.md#clean-vs-humanize)
+- Configure options and presets: [Options class](api.md#options)
+- Run local build/test loop: [README](../README.md#install-development)

@@ -12,7 +12,7 @@ Add the Rust library crate:
 
 ```toml
 [dependencies]
-rehuman = "0.1.1" # replace with the latest published version
+rehuman = "0.1.2" # replace with the latest published version
 ```
 
 Install CLI binaries (`rehuman`, `ishuman`):
@@ -54,7 +54,14 @@ use rehuman::clean;
 let cleaned = clean("Thanks 👍"); // -> "Thanks"
 ```
 
-By default, keyboard-only mode drops non-ASCII characters rather than transliterating them.
+By default, keyboard-only mode emits ASCII-safe output.
+Non-ASCII text is normalized/transliterated when feasible; unmappable
+characters are removed.
+Tune this with `--non-ascii-policy`, `--extended-keyboard`, and
+`--preserve-joiners` (details in [docs/api.md](docs/api.md#keyboard-only-behavior)
+and [docs/cli.md](docs/cli.md#output-options)).
+For docs/source files where Unicode glyphs matter (for example box-drawing diagrams),
+use the CLI with `--preset code-safe` (or `--keyboard-only false`).
 For detailed semantics and option behavior, use the API reference links below.
 
 ## Documentation

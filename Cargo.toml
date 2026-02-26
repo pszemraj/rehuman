@@ -5,7 +5,7 @@ resolver = "2"
 
 [package]
 name = "rehuman"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Peter Szemraj <peterszemraj+dev@gmail.com>"]
@@ -45,6 +45,7 @@ unorm = ["dep:unicode-normalization"]
 unicode-normalization = { version = "0.1.24", optional = true }
 phf = { version = "0.13.1", features = ["macros"] }
 unicode-segmentation = "1.12"
+deunicode = "1.6.2"
 icu_properties = { version = "2.0.1", features = ["compiled_data"] }
 serde = { version = "1.0.228", features = ["derive"] }
 # CLI runtime (always built; crate is CLI-first)

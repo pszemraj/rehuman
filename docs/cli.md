@@ -1,6 +1,6 @@
 # CLI Guide
 
-This document is the canonical source for CLI behavior.
+This document describes CLI behavior.
 For transformation semantics and option meanings at the library level, see [API Reference](api.md).
 
 rehuman ships two binaries:
@@ -44,14 +44,18 @@ rehuman --stream < huge.log > huge.clean.log
 ```
 
 > [!NOTE]
-> The CLI shares its defaults with the `rehuman::clean` helper: keyboard-only output with emoji dropped.
+> CLI defaults match `rehuman::clean`. For exact non-ASCII/emoji/joiner behavior, see [docs/api.md](api.md#keyboard-only-behavior).
 
 ### Output Options
 
 | Flag                             | Description                                                      |
 | -------------------------------- | ---------------------------------------------------------------- |
+| `--preset <name>`                | Apply named baseline options: `minimal`, `balanced`, `humanize`, `aggressive`, `code-safe` |
 | `--keyboard-only=<bool>`         | Restrict output to ASCII keyboard chars (default `true` for CLI) |
+| `--extended-keyboard=<bool>`     | Allow curated non-ASCII keyboard symbols in keyboard-only mode (default `false`) |
 | `--keep-emoji`                   | Keep emoji even when keyboard-only is active                     |
+| `--non-ascii-policy <mode>`      | `drop`, `fold`, or `transliterate` for keyboard-only non-ASCII handling (default `transliterate`) |
+| `--preserve-joiners=<bool>`      | Preserve ZWJ/ZWNJ when hidden-character removal is enabled (default `false`) |
 | `--unicode-normalization <mode>` | One of `none`, `nfd`, `nfc`, `nfkd`, `nfkc`                      |
 | `--line-endings <style>`         | `lf`, `crlf`, `cr`, or `auto` (preserve input)                   |
 | `--stats`                        | Human-readable statistics to stderr                              |
@@ -70,6 +74,30 @@ Additional boolean overrides accepted by both tools:
 - `--collapse-whitespace`
 
 Each also accepts explicit values (`true/false`, `1/0`, `yes/no`, `on/off`).
+
+### Presets
+
+Available preset names:
+
+- `minimal`
+- `balanced`
+- `humanize`
+- `aggressive`
+- `code-safe`
+
+`code-safe` is intended for docs/source-like text where non-ASCII glyphs and
+literal punctuation should be preserved (for example Unicode box-drawing diagrams).
+
+Preset precedence:
+
+- Config is loaded first.
+- `--preset` replaces the baseline options.
+- Explicit option flags (for example `--keyboard-only false`) apply last.
+
+For bulk cleanup of Markdown/code/docs files:
+
+- preferred: `--preset code-safe`
+- fallback: `--keyboard-only false`
 
 ### Processing Modes
 
@@ -99,7 +127,10 @@ version = 1
 
 [options]
 keyboard_only = true
+extended_keyboard = false
 emoji_policy = "drop"
+non_ascii_policy = "transliterate"
+preserve_joiners = false
 normalize_spaces = true
 normalize_quotes = true
 unicode_normalization = "nfkc"
@@ -114,6 +145,8 @@ unicode_normalization = "nfkc"
 ### Option Dependency Notes
 
 - `--keep-emoji` / `--emoji-policy` require keyboard-only mode (`--keyboard-only true`).
+- `--non-ascii-policy` requires keyboard-only mode (`--keyboard-only true`).
+- `--extended-keyboard` requires keyboard-only mode (`--keyboard-only true`).
 - `--print-config` is a standalone mode and conflicts with processing/output flags.
 
 ### File Size Limit

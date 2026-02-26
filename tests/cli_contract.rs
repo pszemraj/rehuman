@@ -151,7 +151,7 @@ fn rehuman_rejects_explicit_emoji_policy_without_keyboard_mode() {
     );
     assert!(!output.status.success());
     assert!(
-        stderr_text(&output).contains("require keyboard-only mode"),
+        stderr_text(&output).contains("keyboard-only mode"),
         "{}",
         stderr_text(&output)
     );
@@ -166,7 +166,42 @@ fn ishuman_rejects_explicit_emoji_policy_without_keyboard_mode() {
     );
     assert!(!output.status.success());
     assert!(
-        stderr_text(&output).contains("require keyboard-only mode"),
+        stderr_text(&output).contains("keyboard-only mode"),
+        "{}",
+        stderr_text(&output)
+    );
+}
+
+#[test]
+fn rehuman_rejects_explicit_non_ascii_policy_without_keyboard_mode() {
+    let output = run_bin(
+        "rehuman",
+        &[
+            "--keyboard-only",
+            "false",
+            "--non-ascii-policy",
+            "transliterate",
+        ],
+        Some("x"),
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr_text(&output).contains("keyboard-only mode"),
+        "{}",
+        stderr_text(&output)
+    );
+}
+
+#[test]
+fn rehuman_rejects_extended_keyboard_without_keyboard_mode() {
+    let output = run_bin(
+        "rehuman",
+        &["--keyboard-only", "false", "--extended-keyboard", "true"],
+        Some("x"),
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr_text(&output).contains("keyboard-only mode"),
         "{}",
         stderr_text(&output)
     );
@@ -220,6 +255,39 @@ fn stream_output_matches_buffered_output() {
     assert_eq!(stdout_text(&buffered), stdout_text(&streamed));
 
     let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn default_keyboard_mode_folds_latin_diacritics() {
+    let out = run_bin("rehuman", &[], Some("Caf\u{00E9} d\u{00E9}j\u{00E0}\n"));
+    assert!(out.status.success(), "{}", stderr_text(&out));
+    assert_eq!(stdout_text(&out), "Cafe deja\n");
+}
+
+#[test]
+fn default_keyboard_mode_transliterates_non_decomposing_latin() {
+    let out = run_bin("rehuman", &[], Some("Stra\u{00DF}e \u{00BD}\n"));
+    assert!(out.status.success(), "{}", stderr_text(&out));
+    assert_eq!(stdout_text(&out), "Strasse 1/2\n");
+}
+
+#[test]
+fn extended_keyboard_mode_keeps_curated_symbols() {
+    let default = run_bin(
+        "rehuman",
+        &["--non-ascii-policy", "drop"],
+        Some("€ and ™\n"),
+    );
+    assert!(default.status.success(), "{}", stderr_text(&default));
+    assert_eq!(stdout_text(&default), "and\n");
+
+    let extended = run_bin(
+        "rehuman",
+        &["--non-ascii-policy", "drop", "--extended-keyboard", "true"],
+        Some("€ and ™\n"),
+    );
+    assert!(extended.status.success(), "{}", stderr_text(&extended));
+    assert_eq!(stdout_text(&extended), "€ and\n");
 }
 
 #[test]
@@ -293,4 +361,95 @@ fn stats_json_contract_is_consistent_between_bins() {
         serde_json::from_str(&stdout_text(&ishuman_output)).expect("valid ishuman stats json");
 
     assert_eq!(rehuman_json, ishuman_json);
+}
+
+#[test]
+fn code_safe_preset_preserves_diagram_glyphs() {
+    let diagram = "rehuman/\n├── src/\n│   └── lib.rs\n";
+
+    let default_clean = run_bin("rehuman", &[], Some(diagram));
+    assert!(
+        default_clean.status.success(),
+        "{}",
+        stderr_text(&default_clean)
+    );
+    assert_ne!(
+        stdout_text(&default_clean),
+        diagram,
+        "default keyboard-only mode should alter non-ASCII diagram glyphs"
+    );
+
+    let code_safe_clean = run_bin("rehuman", &["--preset", "code-safe"], Some(diagram));
+    assert!(
+        code_safe_clean.status.success(),
+        "{}",
+        stderr_text(&code_safe_clean)
+    );
+    assert_eq!(stdout_text(&code_safe_clean), diagram);
+
+    let default_check = run_bin("ishuman", &[], Some(diagram));
+    assert_eq!(
+        default_check.status.code(),
+        Some(1),
+        "{}",
+        stderr_text(&default_check)
+    );
+
+    let code_safe_check = run_bin("ishuman", &["--preset", "code-safe"], Some(diagram));
+    assert_eq!(
+        code_safe_check.status.code(),
+        Some(0),
+        "{}",
+        stderr_text(&code_safe_check)
+    );
+}
+
+#[test]
+fn code_safe_preset_matches_explicit_safe_flags() {
+    let input = "├── docs/\n│   └── api.md\n“quoted” — text… 👍\n";
+
+    let preset = run_bin("rehuman", &["--preset", "code-safe"], Some(input));
+    assert!(preset.status.success(), "{}", stderr_text(&preset));
+
+    let explicit = run_bin(
+        "rehuman",
+        &[
+            "--keyboard-only",
+            "false",
+            "--normalize-dashes",
+            "false",
+            "--normalize-quotes",
+            "false",
+            "--normalize-other",
+            "false",
+        ],
+        Some(input),
+    );
+    assert!(explicit.status.success(), "{}", stderr_text(&explicit));
+
+    assert_eq!(stdout_text(&preset), stdout_text(&explicit));
+}
+
+#[test]
+fn explicit_flags_override_code_safe_preset() {
+    let diagram = "├── src/\n│   └── lib.rs\n";
+
+    let code_safe = run_bin("rehuman", &["--preset", "code-safe"], Some(diagram));
+    assert!(code_safe.status.success(), "{}", stderr_text(&code_safe));
+    assert_eq!(stdout_text(&code_safe), diagram);
+
+    let overridden = run_bin(
+        "rehuman",
+        &["--preset", "code-safe", "--keyboard-only", "true"],
+        Some(diagram),
+    );
+    assert!(overridden.status.success(), "{}", stderr_text(&overridden));
+    assert_ne!(stdout_text(&overridden), diagram);
+
+    let check = run_bin(
+        "ishuman",
+        &["--preset", "code-safe", "--keyboard-only", "true"],
+        Some(diagram),
+    );
+    assert_eq!(check.status.code(), Some(1), "{}", stderr_text(&check));
 }

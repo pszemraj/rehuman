@@ -1,0 +1,508 @@
+name: Python Release Artifacts
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/python-release-artifacts.yml"
+      - ".github/workflows/python-pypi-publish.yml"
+      - ".cargo/**"
+      - "build.rs"
+      - "python/**"
+      - "src/**"
+      - "tests/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build artifacts for (e.g. v0.1.2 or 0.1.2)"
+        required: false
+        type: string
+      ref:
+        description: "Git ref to build in test_mode when no tag is provided (e.g. feat/builds)"
+        required: false
+        type: string
+      test_mode:
+        description: "Build and validate artifacts without uploading to GitHub Release (recommended)"
+        required: false
+        default: true
+        type: boolean
+      confirm_release_upload:
+        description: "Required for manual release uploads when test_mode=false"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: python-release-artifacts-${{ github.event.release.tag_name || inputs.tag || github.event.pull_request.head.sha || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-tag:
+    name: Resolve Tag and Validate Versions
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      checkout_ref: ${{ steps.resolve.outputs.checkout_ref }}
+      test_mode: ${{ steps.resolve.outputs.test_mode }}
+    steps:
+      - name: Checkout repository with tags
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_TEST_MODE: ${{ inputs.test_mode }}
+          INPUT_CONFIRM_RELEASE_UPLOAD: ${{ inputs.confirm_release_upload }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          resolved_tag=""
+          version=""
+          checkout_ref=""
+          raw_ref=""
+
+          if [[ "${EVENT_NAME}" == "release" ]]; then
+            raw_tag="$(printf '%s' "${RELEASE_TAG}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+            if [[ -z "${raw_tag}" ]]; then
+              echo "::error::release event did not provide github.event.release.tag_name."
+              exit 1
+            fi
+            test_mode="false"
+          elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            raw_tag=""
+            test_mode="true"
+            checkout_ref="${PR_HEAD_SHA}"
+            if [[ -z "${checkout_ref}" ]]; then
+              echo "::error::Unable to resolve pull request head SHA."
+              exit 1
+            fi
+          else
+            raw_tag="$(printf '%s' "${INPUT_TAG}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+            raw_ref="$(printf '%s' "${INPUT_REF}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+            test_mode="${INPUT_TEST_MODE}"
+            if [[ "${test_mode}" != "true" && "${INPUT_CONFIRM_RELEASE_UPLOAD}" != "true" ]]; then
+              echo "::error::Manual release upload requires confirm_release_upload=true."
+              exit 1
+            fi
+          fi
+
+          if [[ -n "${raw_tag}" ]]; then
+            candidates=()
+
+            add_candidate() {
+              local candidate="$1"
+              if [[ -z "${candidate}" ]]; then
+                return
+              fi
+              for existing in "${candidates[@]}"; do
+                if [[ "${existing}" == "${candidate}" ]]; then
+                  return
+                fi
+              done
+              candidates+=("${candidate}")
+            }
+
+            add_candidate "${raw_tag}"
+            if [[ "${raw_tag}" == [Vv]* ]]; then
+              suffix="${raw_tag#?}"
+              add_candidate "v${suffix}"
+              add_candidate "V${suffix}"
+              add_candidate "${suffix}"
+            else
+              add_candidate "v${raw_tag}"
+              add_candidate "V${raw_tag}"
+            fi
+
+            for candidate in "${candidates[@]}"; do
+              if git rev-parse -q --verify "refs/tags/${candidate}" >/dev/null; then
+                resolved_tag="${candidate}"
+                checkout_ref="refs/tags/${candidate}"
+                version="${candidate#[vV]}"
+                break
+              fi
+            done
+
+            if [[ -z "${resolved_tag}" ]]; then
+              echo "::error::Tag '${raw_tag}' does not exist in ${GITHUB_REPOSITORY}."
+              exit 1
+            fi
+          elif [[ "${test_mode}" == "true" && -n "${checkout_ref}" ]]; then
+            if ! git rev-parse -q --verify "${checkout_ref}^{commit}" >/dev/null; then
+              echo "::error::Resolved ref '${checkout_ref}' does not exist."
+              exit 1
+            fi
+          elif [[ "${test_mode}" == "true" && -n "${raw_ref}" ]]; then
+            resolved_input_ref=""
+            for candidate in \
+              "${raw_ref}" \
+              "origin/${raw_ref}" \
+              "refs/remotes/origin/${raw_ref}" \
+              "refs/heads/${raw_ref}" \
+              "refs/tags/${raw_ref}"; do
+              if git rev-parse -q --verify "${candidate}^{commit}" >/dev/null; then
+                resolved_input_ref="${candidate}"
+                break
+              fi
+            done
+
+            if [[ -n "${resolved_input_ref}" ]]; then
+              checkout_ref="$(git rev-parse "${resolved_input_ref}^{commit}")"
+            else
+              # Support manual test_mode runs with branch names that exist only on origin.
+              lsremote_status=0
+              lsremote_output="$(
+                git ls-remote --exit-code origin \
+                  "${raw_ref}" \
+                  "refs/heads/${raw_ref}" \
+                  "refs/tags/${raw_ref}" 2>&1
+              )" || lsremote_status=$?
+              if (( lsremote_status != 0 && lsremote_status != 2 )); then
+                echo "::error::Failed querying origin for ref '${raw_ref}' (git ls-remote exit ${lsremote_status})."
+                echo "::error::${lsremote_output}"
+                exit 1
+              fi
+              remote_sha=""
+              if (( lsremote_status == 0 )); then
+                remote_sha="$(printf '%s\n' "${lsremote_output}" | awk 'NR==1 { print $1 }')"
+              fi
+              if [[ -n "${remote_sha}" ]]; then
+                checkout_ref="${remote_sha}"
+              else
+                echo "::error::Ref '${raw_ref}' does not exist locally or on origin."
+                exit 1
+              fi
+            fi
+          else
+            echo "::error::Provide a tag, or run with test_mode=true and a valid ref input."
+            exit 1
+          fi
+
+          echo "tag=${resolved_tag}" >>"${GITHUB_OUTPUT}"
+          echo "version=${version}" >>"${GITHUB_OUTPUT}"
+          echo "checkout_ref=${checkout_ref}" >>"${GITHUB_OUTPUT}"
+          echo "test_mode=${test_mode}" >>"${GITHUB_OUTPUT}"
+
+      - name: Verify GitHub release exists for tag
+        if: ${{ steps.resolve.outputs.test_mode != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESOLVED_TAG: ${{ steps.resolve.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "${RESOLVED_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+
+      - name: Verify root/python versions and PyPI package name
+        env:
+          EXPECTED_VERSION: ${{ steps.resolve.outputs.version }}
+          CHECKOUT_REF: ${{ steps.resolve.outputs.checkout_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "${CHECKOUT_REF}"
+          python - <<'PY'
+          import os
+          import sys
+          import tomllib
+
+          expected = os.environ.get("EXPECTED_VERSION", "")
+
+          with open("Cargo.toml", "rb") as f:
+              root = tomllib.load(f)
+          with open("python/Cargo.toml", "rb") as f:
+              py_cargo = tomllib.load(f)
+          with open("python/pyproject.toml", "rb") as f:
+              pyproject = tomllib.load(f)
+
+          root_version = root["package"]["version"]
+          py_version = py_cargo["package"]["version"]
+          pypi_name = pyproject["project"]["name"]
+
+          errors = []
+          if root_version != py_version:
+              errors.append(f"root Cargo.toml version {root_version!r} != python/Cargo.toml version {py_version!r}")
+          if expected and root_version != expected:
+              errors.append(f"root Cargo.toml version {root_version!r} != tag version {expected!r}")
+          if expected and py_version != expected:
+              errors.append(f"python/Cargo.toml version {py_version!r} != tag version {expected!r}")
+          if pypi_name != "rehuman":
+              errors.append(f"python/pyproject.toml project.name {pypi_name!r} != 'rehuman'")
+
+          if errors:
+              print("::error::Version/package integrity check failed:", file=sys.stderr)
+              for error in errors:
+                  print(f"::error::{error}", file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
+  build-wheels:
+    name: Build Wheel (${{ matrix.platform.name }})
+    needs: resolve-tag
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: linux-x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: auto
+            smoke_install: true
+            run_pytest: true
+          - name: linux-aarch64
+            runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            manylinux: auto
+            smoke_install: false
+            run_pytest: false
+          - name: macos-arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            smoke_install: true
+            run_pytest: true
+          - name: windows-x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            python_arch: x64
+            smoke_install: true
+            run_pytest: false
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.checkout_ref }}
+
+      - name: Set up Python (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.x"
+          architecture: ${{ matrix.platform.python_arch }}
+
+      - name: Set up Python (non-Windows)
+        if: runner.os != 'Windows'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.x"
+
+      - name: Build wheels (Linux)
+        if: runner.os == 'Linux'
+        uses: PyO3/maturin-action@0629f00e5704e5295af04df4238c070808aa1e96 # v1
+        with:
+          target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux }}
+          # maturin-action doesn't have a manifest-path input; pass -m via args.
+          args: --release --strip -m python/Cargo.toml --out dist
+
+      - name: Build wheels (non-Linux)
+        if: runner.os != 'Linux'
+        uses: PyO3/maturin-action@0629f00e5704e5295af04df4238c070808aa1e96 # v1
+        with:
+          target: ${{ matrix.platform.target }}
+          # maturin-action doesn't have a manifest-path input; pass -m via args.
+          args: --release --strip -m python/Cargo.toml --out dist
+
+      - name: Smoke test wheel import
+        if: matrix.platform.smoke_install == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.whl
+          python - <<'PY'
+          import rehuman
+          print(rehuman.__version__)
+          PY
+
+      - name: Run Python binding tests against built wheel
+        if: matrix.platform.run_pytest == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install pytest
+          python -m pytest -q python/tests
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wheels-${{ matrix.platform.name }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  build-sdist:
+    name: Build and Verify sdist
+    needs: resolve-tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.checkout_ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.x"
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@0629f00e5704e5295af04df4238c070808aa1e96 # v1
+        with:
+          command: sdist
+          args: -m python/Cargo.toml --out dist
+
+      - name: Verify sdist install and import
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install dist/*.tar.gz
+          python - <<'PY'
+          import rehuman
+          print(rehuman.__version__)
+          PY
+
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  finalize-artifacts:
+    name: Finalize Artifacts
+    needs: [resolve-tag, build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download wheel artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download sdist artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Validate distribution set
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+
+          if (( ${#wheels[@]} == 0 )); then
+            echo "::error::No wheel files found in dist/."
+            exit 1
+          fi
+          if (( ${#sdists[@]} != 1 )); then
+            echo "::error::Expected exactly one sdist file in dist/, found ${#sdists[@]}."
+            exit 1
+          fi
+
+      - name: Generate distribution manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          dist = Path("dist")
+          wheels = sorted(p.name for p in dist.glob("rehuman-*.whl"))
+          sdists = sorted(p.name for p in dist.glob("rehuman-*.tar.gz"))
+
+          manifest = {
+              "package": "rehuman",
+              "wheels": wheels,
+              "sdists": sdists,
+          }
+          (dist / "PYTHON_DIST_MANIFEST.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Generate deterministic SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f dist/SHA256SUMS
+          mapfile -t dist_files < <(
+            find dist -maxdepth 1 -type f ! -name "SHA256SUMS" -printf '%f\n' | LC_ALL=C sort
+          )
+          if (( ${#dist_files[@]} == 0 )); then
+            echo "::error::No distribution files found to hash in dist/."
+            exit 1
+          fi
+          (
+            cd dist
+            for file in "${dist_files[@]}"; do
+              sha256sum "${file}"
+            done
+          ) > dist/SHA256SUMS
+
+      - name: Verify generated SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd dist
+            sha256sum -c SHA256SUMS
+          )
+
+      - name: Upload finalized dist artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dist-final
+          path: dist/*
+          if-no-files-found: error
+
+  upload-release-assets:
+    name: Upload Artifacts to GitHub Release
+    needs: [resolve-tag, finalize-artifacts]
+    if: ${{ needs.resolve-tag.outputs.test_mode != 'true' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: python-release-assets-${{ needs.resolve-tag.outputs.tag }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - name: Download finalized dist artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist-final
+          path: dist
+
+      - name: Upload artifacts to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESOLVED_TAG: ${{ needs.resolve-tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${RESOLVED_TAG}" dist/* \
+            --clobber \
+            --repo "${GITHUB_REPOSITORY}"

@@ -1,5 +1,6 @@
 //! rehuman — Unicode‑safe text cleaning & typographic normalization.
 
+use deunicode::deunicode_char;
 use icu_properties::{props, CodePointSetData, CodePointSetDataBorrowed};
 use serde::Serialize;
 use std::borrow::Cow;
@@ -11,7 +12,7 @@ use unicode_segmentation::UnicodeSegmentation;
 mod generated;
 mod sets;
 use generated::{DASH_MAP, QUOTE_MAP, SPACE_MAP};
-pub use sets::{is_emoji, is_hidden_char, is_keyboard_ascii};
+pub use sets::{is_emoji, is_extended_keyboard_char, is_hidden_char, is_keyboard_ascii};
 
 const FRACTION_SLASH: char = '\u{2044}';
 const HORIZONTAL_ELLIPSIS: char = '\u{2026}';
@@ -42,6 +43,17 @@ pub enum EmojiPolicy {
     Drop,
 }
 
+/// Policy for handling non-ASCII graphemes in `keyboard_only` mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NonAsciiPolicy {
+    /// Remove non-ASCII graphemes when they are not explicitly normalized elsewhere.
+    Drop,
+    /// Keep only compatibility-decomposed ASCII output.
+    Fold,
+    /// Fold first, then apply transliteration fallbacks before dropping.
+    Transliterate,
+}
+
 /// Detailed statistics about cleaning operations.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct CleaningStats {
@@ -54,6 +66,7 @@ pub struct CleaningStats {
     pub control_chars_removed: u64,
     pub line_endings_normalized: u64,
     pub non_keyboard_removed: u64,
+    pub non_keyboard_transliterated: u64,
     pub emojis_dropped: u64,
     #[cfg(feature = "security")]
     pub bidi_controls_removed: u64,
@@ -120,6 +133,9 @@ impl CleaningStats {
         self.non_keyboard_removed = self
             .non_keyboard_removed
             .saturating_add(other.non_keyboard_removed);
+        self.non_keyboard_transliterated = self
+            .non_keyboard_transliterated
+            .saturating_add(other.non_keyboard_transliterated);
         self.emojis_dropped = self.emojis_dropped.saturating_add(other.emojis_dropped);
         #[cfg(feature = "security")]
         {
@@ -177,7 +193,10 @@ pub struct CleaningOptions {
     pub normalize_quotes: bool,
     pub normalize_other: bool, // ellipsis (… -> ...), etc.
     pub keyboard_only: bool,
+    pub extended_keyboard: bool, // curated non-ASCII allowlist in keyboard mode
     pub emoji_policy: EmojiPolicy, // effective only if keyboard_only = true
+    pub non_ascii_policy: NonAsciiPolicy, // effective only if keyboard_only = true
+    pub preserve_joiners: bool,  // keep ZWJ/ZWNJ when remove_hidden is enabled
     pub remove_control_chars: bool, // remove Cc excluding \n, \r, \t
     pub collapse_whitespace: bool,
     pub normalize_line_endings: Option<LineEndingStyle>,
@@ -202,7 +221,10 @@ impl Default for CleaningOptions {
             normalize_quotes: true,
             normalize_other: true,
             keyboard_only: true,
+            extended_keyboard: false,
             emoji_policy: EmojiPolicy::Drop,
+            non_ascii_policy: NonAsciiPolicy::Transliterate,
+            preserve_joiners: false,
             remove_control_chars: true,
             collapse_whitespace: false,
             normalize_line_endings: None,
@@ -236,7 +258,10 @@ impl CleaningOptions {
             normalize_quotes: false,
             normalize_other: false,
             keyboard_only: false,
+            extended_keyboard: false,
             emoji_policy: EmojiPolicy::Drop,
+            non_ascii_policy: NonAsciiPolicy::Transliterate,
+            preserve_joiners: false,
             remove_control_chars: false,
             collapse_whitespace: false,
             normalize_line_endings: None,
@@ -258,7 +283,10 @@ impl CleaningOptions {
             normalize_quotes: true,
             normalize_other: true,
             keyboard_only: false,
+            extended_keyboard: false,
             emoji_policy: EmojiPolicy::Drop,
+            non_ascii_policy: NonAsciiPolicy::Transliterate,
+            preserve_joiners: false,
             remove_control_chars: true,
             unicode_normalization: UnicodeNormalizationMode::NFC,
             collapse_whitespace: false,
@@ -280,7 +308,10 @@ impl CleaningOptions {
             normalize_quotes: true,
             normalize_other: true,
             keyboard_only: false,
+            extended_keyboard: false,
             emoji_policy: EmojiPolicy::Drop,
+            non_ascii_policy: NonAsciiPolicy::Transliterate,
+            preserve_joiners: false,
             remove_control_chars: true,
             unicode_normalization: UnicodeNormalizationMode::NFKC,
             collapse_whitespace: true,
@@ -302,7 +333,10 @@ impl CleaningOptions {
             normalize_quotes: true,
             normalize_other: true,
             keyboard_only: true,
+            extended_keyboard: false,
             emoji_policy: EmojiPolicy::Drop,
+            non_ascii_policy: NonAsciiPolicy::Transliterate,
+            preserve_joiners: false,
             remove_control_chars: true,
             collapse_whitespace: true,
             normalize_line_endings: Some(LineEndingStyle::Lf),
@@ -398,6 +432,18 @@ impl CleaningOptionsBuilder {
         self
     }
 
+    /// Set `extended_keyboard`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether curated non-ASCII keyboard characters are allowed.
+    ///
+    /// # Returns
+    /// Updated builder.
+    pub fn extended_keyboard(mut self, value: bool) -> Self {
+        self.options.extended_keyboard = value;
+        self
+    }
+
     /// Set `emoji_policy`.
     ///
     /// # Arguments
@@ -407,6 +453,30 @@ impl CleaningOptionsBuilder {
     /// Updated builder.
     pub fn emoji_policy(mut self, policy: EmojiPolicy) -> Self {
         self.options.emoji_policy = policy;
+        self
+    }
+
+    /// Set `non_ascii_policy`.
+    ///
+    /// # Arguments
+    /// - `policy`: Non-ASCII handling strategy in keyboard-only mode.
+    ///
+    /// # Returns
+    /// Updated builder.
+    pub fn non_ascii_policy(mut self, policy: NonAsciiPolicy) -> Self {
+        self.options.non_ascii_policy = policy;
+        self
+    }
+
+    /// Set `preserve_joiners`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether ZWJ/ZWNJ are preserved when `remove_hidden` is enabled.
+    ///
+    /// # Returns
+    /// Updated builder.
+    pub fn preserve_joiners(mut self, value: bool) -> Self {
+        self.options.preserve_joiners = value;
         self
     }
 
@@ -777,10 +847,10 @@ impl TextCleaner {
                 }
 
                 if self.options.remove_hidden && default_ignorables.contains(c) {
-                    let keep_hidden = (!self.options.keyboard_only
-                        || matches!(self.options.emoji_policy, EmojiPolicy::Keep))
-                        && ensure_emoji_cluster(&mut emoji_classifier);
-                    // TODO: expose a preserve-joiners toggle so ZWJ/ZWNJ handling can be configured.
+                    let keep_hidden = (self.options.preserve_joiners && is_joiner(c))
+                        || ((!self.options.keyboard_only
+                            || matches!(self.options.emoji_policy, EmojiPolicy::Keep))
+                            && ensure_emoji_cluster(&mut emoji_classifier));
                     if keep_hidden {
                         cluster_buffer.push(c);
                     } else {
@@ -869,11 +939,44 @@ impl TextCleaner {
 
             if self.options.keyboard_only {
                 let is_emoji_cluster = ensure_emoji_cluster(&mut emoji_classifier);
-                // TODO: offer an optional transliteration path when dropping non-ASCII characters.
-                let keep_cluster = cluster_buffer.chars().all(is_keyboard_ascii)
-                    || (is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep));
+                if is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep) {
+                    if pending_ws > 0 {
+                        if drop_leading_whitespace && !emitted_anything {
+                            pending_ws = 0;
+                        } else {
+                            flush_pending_whitespace(out, pending_ws, collapse);
+                            pending_ws = 0;
+                        }
+                    }
+                    out.push_str(&cluster_buffer);
+                    emitted_anything = true;
+                    drop_leading_whitespace = false;
+                    continue;
+                }
 
-                if keep_cluster {
+                if let Some(rewrite) = rewrite_cluster_to_keyboard_ascii(
+                    &cluster_buffer,
+                    self.options.non_ascii_policy,
+                    self.options.extended_keyboard,
+                ) {
+                    if rewrite.non_ascii_transliterated > 0 {
+                        record_change!(
+                            changes,
+                            stats,
+                            non_keyboard_transliterated,
+                            rewrite.non_ascii_transliterated
+                        );
+                    }
+                    if rewrite.non_ascii_removed > 0 {
+                        record_change!(
+                            changes,
+                            stats,
+                            non_keyboard_removed,
+                            rewrite.non_ascii_removed
+                        );
+                    }
+                    cluster_buffer = rewrite.text;
+
                     if pending_ws > 0 {
                         if drop_leading_whitespace && !emitted_anything {
                             pending_ws = 0;
@@ -894,7 +997,10 @@ impl TextCleaner {
                         pending_ws = 1;
                     }
                 } else {
-                    let removed = cluster_buffer.chars().count();
+                    let removed = cluster_buffer
+                        .chars()
+                        .filter(|c| !is_keyboard_allowed(*c, self.options.extended_keyboard))
+                        .count();
                     if removed > 0 {
                         record_change!(changes, stats, non_keyboard_removed, removed);
                     }
@@ -1197,6 +1303,14 @@ fn is_newline_grapheme(g: &str) -> bool {
     matches!(g, "\n" | "\r" | "\r\n")
 }
 
+fn is_joiner(c: char) -> bool {
+    matches!(c, '\u{200C}' | '\u{200D}')
+}
+
+fn is_keyboard_allowed(c: char, extended_keyboard: bool) -> bool {
+    is_keyboard_ascii(c) || (extended_keyboard && is_extended_keyboard_char(c))
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct LineEndingCounts {
     crlf: u64,
@@ -1274,6 +1388,133 @@ fn map_quote(c: char) -> Option<char> {
     QUOTE_MAP.get(&c).copied()
 }
 
+#[derive(Debug)]
+struct KeyboardAsciiRewrite {
+    text: String,
+    non_ascii_transliterated: u64,
+    non_ascii_removed: u64,
+}
+
+fn rewrite_cluster_to_keyboard_ascii(
+    cluster: &str,
+    policy: NonAsciiPolicy,
+    extended_keyboard: bool,
+) -> Option<KeyboardAsciiRewrite> {
+    let mut out = String::with_capacity(cluster.len());
+    let mut non_ascii_transliterated = 0u64;
+    let mut non_ascii_removed = 0u64;
+
+    for c in cluster.chars() {
+        if is_keyboard_allowed(c, extended_keyboard) {
+            out.push(c);
+            continue;
+        }
+
+        let mapped = match policy {
+            NonAsciiPolicy::Drop => false,
+            NonAsciiPolicy::Fold => append_folded_non_ascii(c, &mut out, extended_keyboard),
+            NonAsciiPolicy::Transliterate => {
+                append_folded_non_ascii(c, &mut out, extended_keyboard)
+                    || append_transliterated_non_ascii(c, &mut out, extended_keyboard)
+            }
+        };
+
+        if mapped {
+            non_ascii_transliterated = non_ascii_transliterated.saturating_add(1);
+        } else {
+            non_ascii_removed = non_ascii_removed.saturating_add(1);
+        }
+    }
+
+    if out.is_empty() {
+        None
+    } else {
+        Some(KeyboardAsciiRewrite {
+            text: out,
+            non_ascii_transliterated,
+            non_ascii_removed,
+        })
+    }
+}
+
+#[cfg(feature = "unorm")]
+fn append_folded_non_ascii(c: char, out: &mut String, extended_keyboard: bool) -> bool {
+    let mut added = false;
+    for decomposed in c.to_string().nfkd() {
+        if is_keyboard_allowed(decomposed, extended_keyboard) {
+            out.push(decomposed);
+            added = true;
+        } else if let Some(mapped) = map_compatibility_ascii(decomposed) {
+            out.push(mapped);
+            added = true;
+        }
+    }
+    added
+}
+
+#[cfg(not(feature = "unorm"))]
+fn append_folded_non_ascii(c: char, out: &mut String, _: bool) -> bool {
+    if let Some(mapped) = map_compatibility_ascii(c) {
+        out.push(mapped);
+        true
+    } else {
+        false
+    }
+}
+
+fn append_transliterated_non_ascii(c: char, out: &mut String, extended_keyboard: bool) -> bool {
+    let before = out.len();
+    if let Some(override_mapping) = transliteration_override(c) {
+        append_ascii_mapping(override_mapping, out, extended_keyboard);
+        return out.len() > before;
+    }
+
+    if is_latin_transliteration_candidate(c) {
+        if let Some(mapped) = deunicode_char(c) {
+            append_ascii_mapping(mapped, out, extended_keyboard);
+        }
+    }
+    out.len() > before
+}
+
+fn is_latin_transliteration_candidate(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x00C0..=0x024F
+            | 0x1E00..=0x1EFF
+            | 0x2C60..=0x2C7F
+            | 0xA720..=0xA7FF
+            | 0xAB30..=0xAB6F
+            | 0x10780..=0x107BF
+            | 0x1DF00..=0x1DFFF
+    )
+}
+
+fn append_ascii_mapping(mapped: &str, out: &mut String, extended_keyboard: bool) {
+    for c in mapped.chars() {
+        if is_keyboard_allowed(c, extended_keyboard) {
+            out.push(c);
+        } else if let Some(compat) = map_compatibility_ascii(c) {
+            out.push(compat);
+        }
+    }
+}
+
+fn transliteration_override(c: char) -> Option<&'static str> {
+    match c {
+        'ß' => Some("ss"),
+        'ẞ' => Some("SS"),
+        _ => None,
+    }
+}
+
+fn map_compatibility_ascii(c: char) -> Option<char> {
+    match c {
+        FRACTION_SLASH => Some('/'),
+        _ => None,
+    }
+}
+
 /// Convenience: clean with default options.
 ///
 /// # Arguments
@@ -1281,6 +1522,11 @@ fn map_quote(c: char) -> Option<char> {
 ///
 /// # Returns
 /// Cleaned output and statistics.
+///
+/// The default preset emits keyboard-safe output. Non-ASCII text is
+/// normalized/folded and transliterated when possible (for example
+/// `"Café"` -> `"Cafe"`, `"Straße"` -> `"Strasse"`), while characters
+/// with no feasible ASCII mapping are removed.
 ///
 /// # Errors
 /// This infallible wrapper does not return errors; construct a
@@ -1302,7 +1548,7 @@ pub fn clean(text: &str) -> CleaningResult<'_> {
 ///
 /// # Errors
 /// This infallible wrapper does not return errors; construct a
-/// [`TextCleaner`] and call [`TextCleaner::try_clean`] for fallible behavior.
+/// [`TextCleaner`] and call [`TextCleaner::try_clean`] for error handling.
 ///
 /// # Panics
 /// Panics when normalization is requested but the `unorm` feature is disabled.
@@ -1430,6 +1676,87 @@ mod tests {
         assert_eq!(out.text, "Ascii");
         assert_eq!(out.stats.emojis_dropped, 1);
         assert!(out.stats.non_keyboard_removed >= 2);
+    }
+
+    #[test]
+    fn keyboard_only_folds_latin_diacritics_to_ascii() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean("Caf\u{00E9} d\u{00E9}j\u{00E0} vu");
+        assert_eq!(out.text, "Cafe deja vu");
+        assert!(out.stats.non_keyboard_transliterated >= 3);
+    }
+
+    #[test]
+    fn transliterates_non_decomposing_latin_letters() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean("Stra\u{00DF}e \u{00C6}sir \u{00F8}l \u{0153}uvre");
+        assert_eq!(out.text, "Strasse AEsir ol oeuvre");
+        assert!(out.stats.non_keyboard_transliterated >= 4);
+    }
+
+    #[test]
+    fn non_ascii_policy_modes_control_behavior() {
+        let drop = TextCleaner::new(
+            CleaningOptions::builder()
+                .non_ascii_policy(NonAsciiPolicy::Drop)
+                .build(),
+        )
+        .clean("Stra\u{00DF}e \u{00BD} \u{2122}");
+        assert_eq!(drop.text, "Strae");
+
+        let fold = TextCleaner::new(
+            CleaningOptions::builder()
+                .non_ascii_policy(NonAsciiPolicy::Fold)
+                .build(),
+        )
+        .clean("Stra\u{00DF}e \u{00BD} \u{2122}");
+        assert_eq!(fold.text, "Strae 1/2 TM");
+
+        let transliterate = TextCleaner::new(
+            CleaningOptions::builder()
+                .non_ascii_policy(NonAsciiPolicy::Transliterate)
+                .build(),
+        )
+        .clean("Stra\u{00DF}e \u{00BD} \u{2122}");
+        assert_eq!(transliterate.text, "Strasse 1/2 TM");
+        assert!(transliterate.stats.non_keyboard_transliterated >= 3);
+    }
+
+    #[test]
+    fn extended_keyboard_allowlist_can_preserve_curated_symbols() {
+        let default = TextCleaner::new(
+            CleaningOptions::builder()
+                .non_ascii_policy(NonAsciiPolicy::Drop)
+                .build(),
+        )
+        .clean("€ and ™");
+        assert_eq!(default.text, "and");
+
+        let extended = TextCleaner::new(
+            CleaningOptions::builder()
+                .extended_keyboard(true)
+                .non_ascii_policy(NonAsciiPolicy::Drop)
+                .build(),
+        )
+        .clean("€ and ™");
+        assert_eq!(extended.text, "€ and");
+    }
+
+    #[test]
+    fn preserve_joiners_toggle_controls_zwj_zwnj_retention() {
+        let text = "می\u{200C}خواهم";
+        let default =
+            TextCleaner::new(CleaningOptions::builder().keyboard_only(false).build()).clean(text);
+        assert!(!default.text.contains('\u{200C}'));
+
+        let preserved = TextCleaner::new(
+            CleaningOptions::builder()
+                .keyboard_only(false)
+                .preserve_joiners(true)
+                .build(),
+        )
+        .clean(text);
+        assert!(preserved.text.contains('\u{200C}'));
     }
 
     #[test]

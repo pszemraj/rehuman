@@ -80,6 +80,7 @@ def test_stats_contains_expected_keys() -> None:
         "control_chars_removed",
         "line_endings_normalized",
         "non_keyboard_removed",
+        "non_keyboard_transliterated",
         "emojis_dropped",
     }
     assert keys.issubset(stats.keys())
@@ -99,6 +100,12 @@ def test_invalid_line_endings_raises_value_error() -> None:
         rehuman.Options(line_endings="bogus")
 
 
+def test_invalid_non_ascii_policy_raises_value_error() -> None:
+    """Invalid non-ASCII policy is rejected with `ValueError`."""
+    with pytest.raises(ValueError, match="invalid non-ASCII policy"):
+        rehuman.Options(non_ascii_policy="bogus")
+
+
 def test_line_endings_lf() -> None:
     """Line-ending normalization can force LF output."""
     options = rehuman.Options(line_endings="lf")
@@ -113,6 +120,55 @@ def test_unorm_is_available_by_default() -> None:
     assert result.text == "\u00e9"
 
 
+def test_keyboard_only_transliteration_policy_modes() -> None:
+    """Keyboard-only mode supports drop, fold, and transliterate policies."""
+    drop = rehuman.Cleaner(
+        rehuman.Options(keyboard_only=True, non_ascii_policy="drop")
+    ).clean("Stra\u00dfe \u00bd \u2122")
+    fold = rehuman.Cleaner(
+        rehuman.Options(keyboard_only=True, non_ascii_policy="fold")
+    ).clean("Stra\u00dfe \u00bd \u2122")
+    transliterate = rehuman.Cleaner(
+        rehuman.Options(keyboard_only=True, non_ascii_policy="transliterate")
+    ).clean("Stra\u00dfe \u00bd \u2122")
+
+    assert drop.text == "Strae"
+    assert fold.text == "Strae 1/2 TM"
+    assert transliterate.text == "Strasse 1/2 TM"
+    assert transliterate.stats["non_keyboard_transliterated"] >= 3
+
+
+def test_extended_keyboard_allowlist_is_configurable() -> None:
+    """Extended keyboard mode keeps curated non-ASCII symbols."""
+    default = rehuman.Cleaner(
+        rehuman.Options(keyboard_only=True, non_ascii_policy="drop")
+    ).clean("\u20ac and \u2122")
+    extended = rehuman.Cleaner(
+        rehuman.Options(
+            keyboard_only=True, non_ascii_policy="drop", extended_keyboard=True
+        )
+    ).clean("\u20ac and \u2122")
+
+    assert default.text == "and"
+    assert extended.text == "\u20ac and"
+
+
+def test_preserve_joiners_toggle() -> None:
+    """Joiners can be preserved when hidden-character removal is enabled."""
+    text = "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645"  # Persian with ZWNJ
+    default = rehuman.Cleaner(
+        rehuman.Options(keyboard_only=False, remove_hidden=True)
+    ).clean(text)
+    preserved = rehuman.Cleaner(
+        rehuman.Options(
+            keyboard_only=False, remove_hidden=True, preserve_joiners=True
+        )
+    ).clean(text)
+
+    assert "\u200c" not in default.text
+    assert "\u200c" in preserved.text
+
+
 def test_presets_minimal_balanced_humanize_aggressive() -> None:
     """Built-in presets map to distinct cleaning behaviors."""
     minimal = rehuman.Cleaner(rehuman.Options.minimal_preset())
@@ -124,7 +180,7 @@ def test_presets_minimal_balanced_humanize_aggressive() -> None:
     assert "\u201c" in minimal.clean(sample).text
     assert balanced.clean(sample).text.startswith('"test"')
     assert "  " not in humanize.clean("a   b").text
-    assert aggressive.clean("Caf\u00e9").text == "Caf"
+    assert aggressive.clean("Caf\u00e9").text == "Cafe"
 
 
 def test_code_safe_preset_preserves_source_like_text() -> None:
@@ -147,6 +203,9 @@ def test_options_repr_and_result_equality_are_value_based() -> None:
     )
     options_repr = repr(options)
     assert "emoji_policy='keep'" in options_repr
+    assert "non_ascii_policy='transliterate'" in options_repr
+    assert "extended_keyboard=false" in options_repr
+    assert "preserve_joiners=false" in options_repr
     assert "line_endings='lf'" in options_repr
     assert "unicode_normalization='nfkc'" in options_repr
 

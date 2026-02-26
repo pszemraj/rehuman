@@ -14,19 +14,23 @@ maturin develop
 
 ## Documentation
 
-Primary Python docs live in this package directory:
-
-- [python/docs/index.md](docs/index.md)
-- [python/docs/api.md](docs/api.md) (canonical Python API semantics)
+See [python/docs/index.md](docs/index.md) for the Python docs map.
 
 ## Quickstart
+
+`clean()` and `humanize()` both return `str`, but they use different defaults:
+
+| Helper | Default behavior |
+| --- | --- |
+| `clean(text)` | Keyboard-safe output (`keyboard_only=True`), transliterates non-ASCII when feasible |
+| `humanize(text)` | Human-readable Unicode output (`keyboard_only=False`), collapses whitespace |
 
 ```python
 import rehuman
 
-# Top-level helpers return cleaned text only
-assert rehuman.clean("\u201cHello\u201d") == '"Hello"'
-assert rehuman.humanize("a   b") == "a b"
+text = "A   B 👍 Café"
+assert rehuman.clean(text) == "A   B Cafe"
+assert rehuman.humanize(text) == "A B 👍 Café"
 
 # Use Cleaner for change counts and stats
 cleaner = rehuman.Cleaner()
@@ -35,6 +39,9 @@ print(result.text)         # "Hithere"
 print(result.changes_made) # e.g. 3
 print(result.stats)        # dict with per-operation counters
 ```
+
+For custom options (`non_ascii_policy`, `extended_keyboard`, `preserve_joiners`,
+presets), see [python/docs/api.md](docs/api.md#options).
 
 ## Tests
 
