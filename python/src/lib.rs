@@ -85,6 +85,9 @@ fn stats_to_dict<'py>(py: Python<'py>, stats: &CleaningStats) -> PyResult<Bound<
 #[pyfunction]
 /// Clean text with the default `rehuman` policy and return cleaned text only.
 ///
+/// Keyboard-only mode folds decomposable Unicode characters to ASCII where
+/// possible (`"Café"` -> `"Cafe"`), then drops remaining non-keyboard glyphs.
+///
 /// Use `Cleaner` when you need `changes_made` and per-operation stats.
 fn clean(text: &str) -> String {
     rehuman::clean(text).text.into_owned()

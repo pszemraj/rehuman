@@ -869,11 +869,29 @@ impl TextCleaner {
 
             if self.options.keyboard_only {
                 let is_emoji_cluster = ensure_emoji_cluster(&mut emoji_classifier);
-                // TODO: offer an optional transliteration path when dropping non-ASCII characters.
-                let keep_cluster = cluster_buffer.chars().all(is_keyboard_ascii)
-                    || (is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep));
+                let mut folded_cluster: Option<String> = None;
+                let keep_cluster = if cluster_buffer.chars().all(is_keyboard_ascii) {
+                    true
+                } else if is_emoji_cluster {
+                    matches!(self.options.emoji_policy, EmojiPolicy::Keep)
+                } else if let Some(folded) = fold_cluster_to_keyboard_ascii(&cluster_buffer) {
+                    folded_cluster = Some(folded);
+                    true
+                } else {
+                    false
+                };
 
                 if keep_cluster {
+                    if let Some(folded) = folded_cluster {
+                        let removed = cluster_buffer
+                            .chars()
+                            .filter(|c| !is_keyboard_ascii(*c))
+                            .count() as u64;
+                        if removed > 0 {
+                            record_change!(changes, stats, non_keyboard_removed, removed);
+                        }
+                        cluster_buffer = folded;
+                    }
                     if pending_ws > 0 {
                         if drop_leading_whitespace && !emitted_anything {
                             pending_ws = 0;
@@ -1274,6 +1292,26 @@ fn map_quote(c: char) -> Option<char> {
     QUOTE_MAP.get(&c).copied()
 }
 
+#[cfg(feature = "unorm")]
+fn fold_cluster_to_keyboard_ascii(cluster: &str) -> Option<String> {
+    let mut out = String::with_capacity(cluster.len());
+    for c in cluster.nfkd() {
+        if is_keyboard_ascii(c) {
+            out.push(c);
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+#[cfg(not(feature = "unorm"))]
+fn fold_cluster_to_keyboard_ascii(_: &str) -> Option<String> {
+    None
+}
+
 /// Convenience: clean with default options.
 ///
 /// # Arguments
@@ -1281,6 +1319,10 @@ fn map_quote(c: char) -> Option<char> {
 ///
 /// # Returns
 /// Cleaned output and statistics.
+///
+/// The default preset emits keyboard-safe output. Decomposable Unicode
+/// characters are folded to ASCII when possible (for example `"Café"` -> `"Cafe"`),
+/// while characters with no ASCII fold are removed.
 ///
 /// # Errors
 /// This infallible wrapper does not return errors; construct a
@@ -1430,6 +1472,14 @@ mod tests {
         assert_eq!(out.text, "Ascii");
         assert_eq!(out.stats.emojis_dropped, 1);
         assert!(out.stats.non_keyboard_removed >= 2);
+    }
+
+    #[test]
+    fn keyboard_only_folds_latin_diacritics_to_ascii() {
+        let cleaner = TextCleaner::new(CleaningOptions::default());
+        let out = cleaner.clean("Caf\u{00E9} d\u{00E9}j\u{00E0} vu");
+        assert_eq!(out.text, "Cafe deja vu");
+        assert!(out.stats.non_keyboard_removed >= 3);
     }
 
     #[test]

@@ -223,6 +223,13 @@ fn stream_output_matches_buffered_output() {
 }
 
 #[test]
+fn default_keyboard_mode_folds_latin_diacritics() {
+    let out = run_bin("rehuman", &[], Some("Caf\u{00E9} d\u{00E9}j\u{00E0}\n"));
+    assert!(out.status.success(), "{}", stderr_text(&out));
+    assert_eq!(stdout_text(&out), "Cafe deja\n");
+}
+
+#[test]
 fn inplace_updates_file_and_is_observable() {
     let dir = make_tmp_dir();
     let input_path = dir.join("rewrite.txt");

@@ -6,7 +6,7 @@
 > Interested in seeing a feature sooner? Open a request at [GitHub Issues](https://github.com/pszemraj/rehuman/issues/new/choose).
 
 - [ ] International keyboard mode with a curated non-ASCII allowlist (€, £, §, …)
-- [ ] Optional transliteration when dropping non-ASCII characters in keyboard-only mode
+- [ ] Configurable policy for keyboard-only ASCII folding (toggle and/or custom mapping)
 - [ ] Toggle to preserve join controls and handle additional ellipsis variants
 - [ ] Automated Unicode data refresh (script + CI)
 - [ ] Benchmark suite (contributions welcome)

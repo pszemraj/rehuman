@@ -124,7 +124,7 @@ def test_presets_minimal_balanced_humanize_aggressive() -> None:
     assert "\u201c" in minimal.clean(sample).text
     assert balanced.clean(sample).text.startswith('"test"')
     assert "  " not in humanize.clean("a   b").text
-    assert aggressive.clean("Caf\u00e9").text == "Caf"
+    assert aggressive.clean("Caf\u00e9").text == "Cafe"
 
 
 def test_code_safe_preset_preserves_source_like_text() -> None:

@@ -29,7 +29,7 @@ Example:
 import rehuman
 
 text = "A   B 👍 Café"
-assert rehuman.clean(text) == "A   B Caf"
+assert rehuman.clean(text) == "A   B Cafe"
 assert rehuman.humanize(text) == "A B 👍 Café"
 ```
 
@@ -40,7 +40,7 @@ assert rehuman.humanize(text) == "A B 👍 Café"
 Runs the default cleaner and returns cleaned text only.
 
 - Default behavior is keyboard-safe output (`keyboard_only=True`).
-- Non-ASCII characters are dropped in keyboard-only mode (not transliterated).
+- In keyboard-only mode, decomposable characters are folded to ASCII when possible (`"Café"` -> `"Cafe"`); characters with no ASCII fold are removed.
 - Whitespace is not collapsed unless you configure it via `Options` + `Cleaner`.
 
 ```python

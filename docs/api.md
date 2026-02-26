@@ -29,7 +29,7 @@ let fancy = humanize("“Quote”—and…more");         // -> "\"Quote\"-and..
 
 - `clean` applies the default preset (hidden character removal, spacing fixes) and emits keyboard-safe ASCII (emoji are dropped unless you opt out).
 - `humanize` applies the "humanize" preset (default preset + typographic normalization + whitespace collapsing).
-- In keyboard-only mode, non-ASCII characters are dropped (not transliterated). Example: `"Café"` becomes `"Caf"`.
+- In keyboard-only mode, decomposable Unicode characters are folded to ASCII when possible. Example: `"Café"` becomes `"Cafe"`.
 
 ## TextCleaner
 

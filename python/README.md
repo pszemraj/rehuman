@@ -25,7 +25,7 @@ import rehuman
 # clean(): keyboard-safe default output
 # humanize(): normalized, human-readable Unicode output
 text = "A   B 👍 Café"
-assert rehuman.clean(text) == "A   B Caf"
+assert rehuman.clean(text) == "A   B Cafe"
 assert rehuman.humanize(text) == "A B 👍 Café"
 
 # Use Cleaner for change counts and stats
