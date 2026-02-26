@@ -85,8 +85,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          tag="${{ steps.resolve.outputs.tag }}"
+          max_attempts=40
+          sleep_seconds=15
+
+          for attempt in $(seq 1 "${max_attempts}"); do
+            wheel_count="$(
+              gh release view "${tag}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --json assets \
+                --jq '[.assets[].name | select(endswith(".whl"))] | length'
+            )"
+            sdist_count="$(
+              gh release view "${tag}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --json assets \
+                --jq '[.assets[].name | select(endswith(".tar.gz"))] | length'
+            )"
+
+            if (( wheel_count > 0 && sdist_count > 0 )); then
+              echo "Found release distributions for '${tag}' (${wheel_count} wheels, ${sdist_count} sdists)."
+              break
+            fi
+
+            if (( attempt == max_attempts )); then
+              echo "::error::Timed out waiting for wheel/sdist assets on release '${tag}'."
+              exit 1
+            fi
+
+            echo "Attempt ${attempt}/${max_attempts}: wheel/sdist assets not ready yet; retrying in ${sleep_seconds}s..."
+            sleep "${sleep_seconds}"
+          done
+
           mkdir -p dist
-          gh release download "${{ steps.resolve.outputs.tag }}" \
+          gh release download "${tag}" \
             --repo "${GITHUB_REPOSITORY}" \
             --dir dist \
             --pattern "*.whl" \

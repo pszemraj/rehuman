@@ -51,6 +51,7 @@ Behavior:
 - Manual prerelease publish requires `allow_prerelease=true`
 - Prerelease status is read from GitHub Release metadata (`prerelease` field)
 - Downloads artifacts from GitHub Release assets (never rebuilds)
+- Waits for wheel/sdist assets to appear on the release before download/publish
 - Requires at least one `.whl` and one `.tar.gz`
 - Publishes with idempotent mode (`skip-existing: true`)
 - Verifies the expected version appears on PyPI after publish
