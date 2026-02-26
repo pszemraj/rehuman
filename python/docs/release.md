@@ -11,6 +11,7 @@ Automation is tag/release-driven and supports both automatic and manual runs.
 Workflow: `.github/workflows/python-release-artifacts.yml`
 
 - Auto trigger: GitHub Release `published`
+- PR trigger: `pull_request` for Python/release-workflow file changes (build/test mode only; no release upload)
 - Manual trigger: `workflow_dispatch` with either:
   - `tag` (release asset upload path), or
   - `test_mode=true` and `ref=<branch-or-ref>` (dry-run build path)
@@ -31,6 +32,11 @@ Behavior:
 - Re-run behavior:
   - release-upload mode: assets are replaced (`gh release upload --clobber`)
   - test mode: artifacts are published only to the workflow run (`dist-final`)
+
+Dispatch nuance:
+
+- `workflow_dispatch` is only available when the workflow file exists on the default branch.
+- After that, dispatch can target another ref (`gh workflow run ... --ref <branch>`), which runs that ref's workflow content.
 
 ### Workflow 2: Publish to PyPI
 

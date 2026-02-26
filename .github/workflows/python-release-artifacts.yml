@@ -3,6 +3,13 @@ name: Python Release Artifacts
 on:
   release:
     types: [published]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/python-release-artifacts.yml"
+      - "python/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
   workflow_dispatch:
     inputs:
       tag:
@@ -42,6 +49,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_REF: ${{ inputs.ref }}
           INPUT_TEST_MODE: ${{ inputs.test_mode }}
@@ -55,6 +63,14 @@ jobs:
           if [[ "${EVENT_NAME}" == "release" ]]; then
             raw_tag="${RELEASE_TAG}"
             test_mode="false"
+          elif [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            raw_tag=""
+            test_mode="true"
+            checkout_ref="${PR_HEAD_SHA}"
+            if [[ -z "${checkout_ref}" ]]; then
+              echo "::error::Unable to resolve pull request head SHA."
+              exit 1
+            fi
           else
             raw_tag="${INPUT_TAG}"
             test_mode="${INPUT_TEST_MODE}"
@@ -79,6 +95,11 @@ jobs:
 
             if [[ -z "${resolved_tag}" ]]; then
               echo "::error::Tag '${raw_tag}' does not exist in ${GITHUB_REPOSITORY}."
+              exit 1
+            fi
+          elif [[ "${test_mode}" == "true" && -n "${checkout_ref}" ]]; then
+            if ! git rev-parse -q --verify "${checkout_ref}^{commit}" >/dev/null; then
+              echo "::error::Resolved ref '${checkout_ref}' does not exist."
               exit 1
             fi
           elif [[ "${test_mode}" == "true" && -n "${INPUT_REF}" ]]; then
