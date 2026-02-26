@@ -39,10 +39,9 @@ assert rehuman.humanize(text) == "A B 👍 Café"
 
 Runs the default cleaner and returns cleaned text only.
 
-- Default behavior is keyboard-safe output (`keyboard_only=True`).
-- In keyboard-only mode, text is normalized then transliterated to ASCII when feasible (`"Café"` -> `"Cafe"`, `"Straße"` -> `"Strasse"`), then remaining non-ASCII characters are removed.
-- Use `non_ascii_policy="drop"|"fold"|"transliterate"` and `extended_keyboard=True` to control this behavior.
-- Whitespace is not collapsed unless you configure it via `Options` + `Cleaner`.
+- Default behavior: keyboard-safe output (`keyboard_only=True`).
+- For the exact policy differences versus `humanize`, see [clean vs humanize](#clean-vs-humanize).
+- For option-level control (`non_ascii_policy`, `extended_keyboard`, `preserve_joiners`), use [`Options`](#options) with [`Cleaner`](#cleaner).
 
 ```python
 import rehuman
@@ -55,9 +54,9 @@ assert rehuman.clean("Thanks 👍") == "Thanks"
 
 Runs the Rust `humanize` preset and returns cleaned text only.
 
-- Intended for normalized, human-readable Unicode output.
-- Collapses repeated whitespace.
-- Applies NFKC normalization.
+- Default behavior: human-readable Unicode output (`keyboard_only=False`).
+- Collapses repeated whitespace and applies NFKC normalization.
+- For the exact policy differences versus `clean`, see [clean vs humanize](#clean-vs-humanize).
 
 ```python
 import rehuman

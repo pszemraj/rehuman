@@ -5,9 +5,10 @@
 > [!TIP]
 > Interested in seeing a feature sooner? Open a request at [GitHub Issues](https://github.com/pszemraj/rehuman/issues/new/choose).
 
-- [ ] International keyboard mode with a curated non-ASCII allowlist (€, £, §, …)
 - [ ] Expand transliteration coverage and tune script-specific mappings beyond Latin-focused defaults
-- [ ] Toggle to preserve join controls and handle additional ellipsis variants
+- [ ] Extend `extended_keyboard` coverage with script-specific opt-in profiles
+- [ ] Tune preset-level defaults for `preserve_joiners` in script-sensitive contexts
+- [ ] Handle additional ellipsis/compatibility punctuation variants
 - [ ] Automated Unicode data refresh (script + CI)
 - [ ] Benchmark suite (contributions welcome)
 

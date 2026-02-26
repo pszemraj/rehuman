@@ -52,10 +52,10 @@ rehuman --stream < huge.log > huge.clean.log
 | -------------------------------- | ---------------------------------------------------------------- |
 | `--preset <name>`                | Apply named baseline options: `minimal`, `balanced`, `humanize`, `aggressive`, `code-safe` |
 | `--keyboard-only=<bool>`         | Restrict output to ASCII keyboard chars (default `true` for CLI) |
-| `--extended-keyboard=<bool>`     | Allow curated non-ASCII keyboard symbols when keyboard-only is active |
+| `--extended-keyboard=<bool>`     | Allow curated non-ASCII keyboard symbols in keyboard-only mode (default `false`) |
 | `--keep-emoji`                   | Keep emoji even when keyboard-only is active                     |
-| `--non-ascii-policy <mode>`      | `drop`, `fold`, or `transliterate` for keyboard-only non-ASCII handling |
-| `--preserve-joiners=<bool>`      | Preserve ZWJ/ZWNJ when hidden-character removal is enabled        |
+| `--non-ascii-policy <mode>`      | `drop`, `fold`, or `transliterate` for keyboard-only non-ASCII handling (default `transliterate`) |
+| `--preserve-joiners=<bool>`      | Preserve ZWJ/ZWNJ when hidden-character removal is enabled (default `false`) |
 | `--unicode-normalization <mode>` | One of `none`, `nfd`, `nfc`, `nfkd`, `nfkc`                      |
 | `--line-endings <style>`         | `lf`, `crlf`, `cr`, or `auto` (preserve input)                   |
 | `--stats`                        | Human-readable statistics to stderr                              |

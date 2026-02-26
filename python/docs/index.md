@@ -8,9 +8,8 @@ Python package documentation for `import rehuman`.
 - [Release Automation](release.md): wheel/sdist release assets and PyPI publish flows.
 - [Package README](../README.md): local install, quickstart, and test commands.
 
-## Getting Started
+## Common Tasks
 
-- Install/build locally: [README install section](../README.md#install-development)
-- Python usage example: [README quickstart](../README.md#quickstart)
-- `clean()` vs `humanize()` behavior: [API comparison](api.md#clean-vs-humanize)
-- Run Python tests: [README tests](../README.md#tests)
+- Compare `clean()` vs `humanize()`: [API comparison](api.md#clean-vs-humanize)
+- Configure options and presets: [Options class](api.md#options)
+- Run local build/test loop: [README](../README.md#install-development)
