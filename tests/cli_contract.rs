@@ -2,7 +2,7 @@
 
 use std::env;
 use std::fs;
-use std::io::{ErrorKind, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
@@ -65,11 +65,9 @@ fn run_bin(name: &str, args: &[&str], stdin_data: Option<&str>) -> Output {
     let mut child = cmd.spawn().expect("failed to spawn test command");
     if let Some(data) = stdin_data {
         let mut stdin = child.stdin.take().expect("stdin was not piped");
-        if let Err(err) = stdin.write_all(data.as_bytes()) {
-            if err.kind() != ErrorKind::BrokenPipe {
-                panic!("failed to write stdin: {err}");
-            }
-        }
+        stdin
+            .write_all(data.as_bytes())
+            .expect("failed to write stdin");
     }
 
     child
@@ -149,7 +147,7 @@ fn rehuman_rejects_explicit_emoji_policy_without_keyboard_mode() {
     let output = run_bin(
         "rehuman",
         &["--keyboard-only", "false", "--emoji-policy", "drop"],
-        Some("x😀y"),
+        None,
     );
     assert!(!output.status.success());
     assert!(
@@ -164,7 +162,7 @@ fn ishuman_rejects_explicit_emoji_policy_without_keyboard_mode() {
     let output = run_bin(
         "ishuman",
         &["--keyboard-only", "false", "--keep-emoji"],
-        Some("x😀y"),
+        None,
     );
     assert!(!output.status.success());
     assert!(
@@ -184,7 +182,7 @@ fn rehuman_rejects_explicit_non_ascii_policy_without_keyboard_mode() {
             "--non-ascii-policy",
             "transliterate",
         ],
-        Some("x"),
+        None,
     );
     assert!(!output.status.success());
     assert!(
@@ -199,7 +197,7 @@ fn rehuman_rejects_extended_keyboard_without_keyboard_mode() {
     let output = run_bin(
         "rehuman",
         &["--keyboard-only", "false", "--extended-keyboard", "true"],
-        Some("x"),
+        None,
     );
     assert!(!output.status.success());
     assert!(
