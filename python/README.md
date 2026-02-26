@@ -21,9 +21,12 @@ See [python/docs/index.md](docs/index.md) for the Python docs map.
 ```python
 import rehuman
 
-# Top-level helpers return cleaned text only
-assert rehuman.clean("\u201cHello\u201d") == '"Hello"'
-assert rehuman.humanize("a   b") == "a b"
+# Top-level helpers return cleaned text only.
+# clean(): keyboard-safe default output
+# humanize(): normalized, human-readable Unicode output
+text = "A   B 👍 Café"
+assert rehuman.clean(text) == "A   B Caf"
+assert rehuman.humanize(text) == "A B 👍 Café"
 
 # Use Cleaner for change counts and stats
 cleaner = rehuman.Cleaner()

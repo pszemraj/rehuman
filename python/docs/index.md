@@ -12,4 +12,5 @@ Python package documentation for `import rehuman`.
 
 - Install/build locally: [README install section](../README.md#install-development)
 - Python usage example: [README quickstart](../README.md#quickstart)
+- `clean()` vs `humanize()` behavior: [API comparison](api.md#clean-vs-humanize)
 - Run Python tests: [README tests](../README.md#tests)

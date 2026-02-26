@@ -14,15 +14,34 @@ Top-level metadata/constants:
 - `rehuman.HAS_STATS: bool`
 - `rehuman.HAS_SECURITY: bool`
 
+## `clean` vs `humanize`
+
+Both helpers return `str`. They differ in policy:
+
+| Helper | Preset Basis | Keyboard-Only | Whitespace Collapse | Unicode Normalization |
+| --- | --- | --- | --- | --- |
+| `clean(text)` | `CleaningOptions::default()` | `true` | `false` | `none` |
+| `humanize(text)` | `CleaningOptions::humanize()` | `false` | `true` | `nfkc` |
+
+Example:
+
+```python
+import rehuman
+
+text = "A   B 👍 Café"
+assert rehuman.clean(text) == "A   B Caf"
+assert rehuman.humanize(text) == "A B 👍 Café"
+```
+
 ## Functions
 
 ### `clean(text: str) -> str`
 
 Runs the default cleaner and returns cleaned text only.
 
-- Default behavior is keyboard-safe output.
-- Emoji are dropped unless configured otherwise through `Options` + `Cleaner`.
+- Default behavior is keyboard-safe output (`keyboard_only=True`).
 - Non-ASCII characters are dropped in keyboard-only mode (not transliterated).
+- Whitespace is not collapsed unless you configure it via `Options` + `Cleaner`.
 
 ```python
 import rehuman
@@ -34,6 +53,10 @@ assert rehuman.clean("Thanks 👍") == "Thanks"
 ### `humanize(text: str) -> str`
 
 Runs the Rust `humanize` preset and returns cleaned text only.
+
+- Intended for normalized, human-readable Unicode output.
+- Collapses repeated whitespace.
+- Applies NFKC normalization.
 
 ```python
 import rehuman
