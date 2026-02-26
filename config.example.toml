@@ -7,8 +7,10 @@
 version = 1
 [options]
 keyboard_only = true
+extended_keyboard = false
 emoji_policy = "drop" # "drop" or "keep"
 non_ascii_policy = "transliterate" # "drop", "fold", "transliterate"
+preserve_joiners = false
 remove_hidden = true
 remove_trailing_whitespace = true
 remove_control_chars = true

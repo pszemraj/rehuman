@@ -28,6 +28,11 @@ text = "A   B 👍 Café"
 assert rehuman.clean(text) == "A   B Cafe"
 assert rehuman.humanize(text) == "A B 👍 Café"
 
+# Optional controls:
+# - non_ascii_policy="drop"|"fold"|"transliterate"
+# - extended_keyboard=True for curated non-ASCII symbols
+# - preserve_joiners=True to retain ZWJ/ZWNJ when remove_hidden=True
+
 # Use Cleaner for change counts and stats
 cleaner = rehuman.Cleaner()
 result = cleaner.clean("Hi\u200bthere \U0001f44d")

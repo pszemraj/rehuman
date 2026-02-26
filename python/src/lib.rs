@@ -196,8 +196,10 @@ impl Options {
         normalize_quotes = true,
         normalize_other = true,
         keyboard_only = true,
+        extended_keyboard = false,
         keep_emoji = false,
         non_ascii_policy = "transliterate",
+        preserve_joiners = false,
         remove_control_chars = true,
         collapse_whitespace = false,
         line_endings = None,
@@ -213,8 +215,10 @@ impl Options {
         normalize_quotes: bool,
         normalize_other: bool,
         keyboard_only: bool,
+        extended_keyboard: bool,
         keep_emoji: bool,
         non_ascii_policy: &str,
+        preserve_joiners: bool,
         remove_control_chars: bool,
         collapse_whitespace: bool,
         line_endings: Option<&str>,
@@ -238,8 +242,10 @@ impl Options {
             .normalize_quotes(normalize_quotes)
             .normalize_other(normalize_other)
             .keyboard_only(keyboard_only)
+            .extended_keyboard(extended_keyboard)
             .emoji_policy(emoji_policy)
             .non_ascii_policy(non_ascii_policy)
+            .preserve_joiners(preserve_joiners)
             .remove_control_chars(remove_control_chars)
             .collapse_whitespace(collapse_whitespace)
             .normalize_line_endings(normalize_line_endings)
@@ -260,8 +266,10 @@ impl Options {
         normalize_quotes = true,
         normalize_other = true,
         keyboard_only = true,
+        extended_keyboard = false,
         keep_emoji = false,
         non_ascii_policy = "transliterate",
+        preserve_joiners = false,
         remove_control_chars = true,
         collapse_whitespace = false,
         line_endings = None,
@@ -276,8 +284,10 @@ impl Options {
         normalize_quotes: bool,
         normalize_other: bool,
         keyboard_only: bool,
+        extended_keyboard: bool,
         keep_emoji: bool,
         non_ascii_policy: &str,
+        preserve_joiners: bool,
         remove_control_chars: bool,
         collapse_whitespace: bool,
         line_endings: Option<&str>,
@@ -300,8 +310,10 @@ impl Options {
             .normalize_quotes(normalize_quotes)
             .normalize_other(normalize_other)
             .keyboard_only(keyboard_only)
+            .extended_keyboard(extended_keyboard)
             .emoji_policy(emoji_policy)
             .non_ascii_policy(non_ascii_policy)
+            .preserve_joiners(preserve_joiners)
             .remove_control_chars(remove_control_chars)
             .collapse_whitespace(collapse_whitespace)
             .normalize_line_endings(normalize_line_endings)
@@ -357,7 +369,10 @@ impl Options {
             .normalize_quotes(false)
             .normalize_other(false)
             .keyboard_only(false)
+            .extended_keyboard(false)
             .emoji_policy(EmojiPolicy::Keep)
+            .non_ascii_policy(NonAsciiPolicy::Transliterate)
+            .preserve_joiners(true)
             .remove_control_chars(true)
             .collapse_whitespace(false)
             .normalize_line_endings(None)
@@ -382,7 +397,7 @@ impl Options {
                 "Options(",
                 "remove_hidden={}, remove_trailing_whitespace={}, normalize_spaces={}, ",
                 "normalize_dashes={}, normalize_quotes={}, normalize_other={}, ",
-                "keyboard_only={}, emoji_policy='{}', non_ascii_policy='{}', remove_control_chars={}, ",
+                "keyboard_only={}, extended_keyboard={}, emoji_policy='{}', non_ascii_policy='{}', preserve_joiners={}, remove_control_chars={}, ",
                 "collapse_whitespace={}, line_endings='{}', unicode_normalization='{}'",
                 "{})"
             ),
@@ -393,8 +408,10 @@ impl Options {
             o.normalize_quotes,
             o.normalize_other,
             o.keyboard_only,
+            o.extended_keyboard,
             format_emoji_policy(o.emoji_policy),
             format_non_ascii_policy(o.non_ascii_policy),
+            o.preserve_joiners,
             o.remove_control_chars,
             o.collapse_whitespace,
             format_line_endings(o.normalize_line_endings),

@@ -138,6 +138,37 @@ def test_keyboard_only_transliteration_policy_modes() -> None:
     assert transliterate.stats["non_keyboard_transliterated"] >= 3
 
 
+def test_extended_keyboard_allowlist_is_configurable() -> None:
+    """Extended keyboard mode keeps curated non-ASCII symbols."""
+    default = rehuman.Cleaner(
+        rehuman.Options(keyboard_only=True, non_ascii_policy="drop")
+    ).clean("\u20ac and \u2122")
+    extended = rehuman.Cleaner(
+        rehuman.Options(
+            keyboard_only=True, non_ascii_policy="drop", extended_keyboard=True
+        )
+    ).clean("\u20ac and \u2122")
+
+    assert default.text == "and"
+    assert extended.text == "\u20ac and"
+
+
+def test_preserve_joiners_toggle() -> None:
+    """Joiners can be preserved when hidden-character removal is enabled."""
+    text = "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645"  # Persian with ZWNJ
+    default = rehuman.Cleaner(
+        rehuman.Options(keyboard_only=False, remove_hidden=True)
+    ).clean(text)
+    preserved = rehuman.Cleaner(
+        rehuman.Options(
+            keyboard_only=False, remove_hidden=True, preserve_joiners=True
+        )
+    ).clean(text)
+
+    assert "\u200c" not in default.text
+    assert "\u200c" in preserved.text
+
+
 def test_presets_minimal_balanced_humanize_aggressive() -> None:
     """Built-in presets map to distinct cleaning behaviors."""
     minimal = rehuman.Cleaner(rehuman.Options.minimal_preset())
@@ -173,6 +204,8 @@ def test_options_repr_and_result_equality_are_value_based() -> None:
     options_repr = repr(options)
     assert "emoji_policy='keep'" in options_repr
     assert "non_ascii_policy='transliterate'" in options_repr
+    assert "extended_keyboard=false" in options_repr
+    assert "preserve_joiners=false" in options_repr
     assert "line_endings='lf'" in options_repr
     assert "unicode_normalization='nfkc'" in options_repr
 

@@ -30,6 +30,7 @@ let fancy = humanize("“Quote”—and…more");         // -> "\"Quote\"-and..
 - `clean` applies the default preset (hidden character removal, spacing fixes) and emits keyboard-safe ASCII (emoji are dropped unless you opt out).
 - `humanize` applies the "humanize" preset (default preset + typographic normalization + whitespace collapsing).
 - In keyboard-only mode, non-ASCII text is first normalized/folded and then transliterated when possible. Examples: `"Café"` becomes `"Cafe"`, `"Straße"` becomes `"Strasse"`.
+- Hidden joiners (ZWJ/ZWNJ) are removed by default; set `preserve_joiners` when script semantics require keeping them.
 
 ## TextCleaner
 
@@ -79,8 +80,10 @@ println!("dashes normalized: {}", result.stats.dashes_normalized);
 | `normalize_quotes`           | Map quotation marks to ASCII quotes                               |
 | `normalize_other`            | Misc fixes (ellipsis → `...`, fraction slash → `/`)               |
 | `keyboard_only`              | Keep ASCII keyboard characters (plus whitespace)                  |
+| `extended_keyboard`          | Allow curated non-ASCII keyboard symbols in keyboard-only mode     |
 | `emoji_policy`               | Control emoji in `keyboard_only` mode (`Drop`/`Keep`)             |
 | `non_ascii_policy`           | Non-ASCII strategy in `keyboard_only` mode (`Drop`/`Fold`/`Transliterate`) |
+| `preserve_joiners`           | Preserve ZWJ/ZWNJ when hidden-character removal is enabled         |
 | `remove_control_chars`       | Drop control chars except `\n`, `\r`, `\t`                        |
 | `collapse_whitespace`        | Collapse consecutive spaces/tabs to a single space                |
 | `normalize_line_endings`     | Force LF/CRLF/CR output                                           |
@@ -94,8 +97,10 @@ Create tailored configurations with the fluent builder:
 ```rust
 let options = CleaningOptions::builder()
     .keyboard_only(true)
+    .extended_keyboard(false)
     .emoji_policy(EmojiPolicy::Keep)
     .non_ascii_policy(NonAsciiPolicy::Transliterate)
+    .preserve_joiners(false)
     .remove_hidden(false)
     .normalize_line_endings(None)
     .build();

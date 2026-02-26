@@ -63,7 +63,10 @@ pub fn code_safe_options() -> CleaningOptions {
         .normalize_quotes(false)
         .normalize_other(false)
         .keyboard_only(false)
+        .extended_keyboard(false)
         .emoji_policy(EmojiPolicy::Keep)
+        .non_ascii_policy(NonAsciiPolicy::Transliterate)
+        .preserve_joiners(true)
         .remove_control_chars(true)
         .collapse_whitespace(false)
         .normalize_line_endings(None)
@@ -210,8 +213,10 @@ pub struct PartialOptions {
     pub normalize_quotes: Option<bool>,
     pub normalize_other: Option<bool>,
     pub keyboard_only: Option<bool>,
+    pub extended_keyboard: Option<bool>,
     pub emoji_policy: Option<EmojiPolicyArg>,
     pub non_ascii_policy: Option<NonAsciiPolicyArg>,
+    pub preserve_joiners: Option<bool>,
     pub remove_control_chars: Option<bool>,
     pub collapse_whitespace: Option<bool>,
     pub line_endings: Option<LineEndingChoice>,
@@ -244,11 +249,17 @@ impl PartialOptions {
         if let Some(val) = self.keyboard_only {
             options.keyboard_only = val;
         }
+        if let Some(val) = self.extended_keyboard {
+            options.extended_keyboard = val;
+        }
         if let Some(policy) = self.emoji_policy {
             options.emoji_policy = policy.into();
         }
         if let Some(policy) = self.non_ascii_policy {
             options.non_ascii_policy = policy.into();
+        }
+        if let Some(val) = self.preserve_joiners {
+            options.preserve_joiners = val;
         }
         if let Some(val) = self.remove_control_chars {
             options.remove_control_chars = val;
@@ -281,8 +292,10 @@ pub struct SerializableOptions {
     pub normalize_quotes: bool,
     pub normalize_other: bool,
     pub keyboard_only: bool,
+    pub extended_keyboard: bool,
     pub emoji_policy: EmojiPolicyArg,
     pub non_ascii_policy: NonAsciiPolicyArg,
+    pub preserve_joiners: bool,
     pub remove_control_chars: bool,
     pub collapse_whitespace: bool,
     pub line_endings: LineEndingChoice,
@@ -311,8 +324,10 @@ impl SerializableOptions {
             .normalize_quotes(self.normalize_quotes)
             .normalize_other(self.normalize_other)
             .keyboard_only(self.keyboard_only)
+            .extended_keyboard(self.extended_keyboard)
             .emoji_policy(self.emoji_policy.into())
             .non_ascii_policy(self.non_ascii_policy.into())
+            .preserve_joiners(self.preserve_joiners)
             .remove_control_chars(self.remove_control_chars)
             .collapse_whitespace(self.collapse_whitespace)
             .normalize_line_endings(self.line_endings.into_option())
@@ -335,8 +350,10 @@ impl SerializableOptions {
             normalize_quotes: options.normalize_quotes,
             normalize_other: options.normalize_other,
             keyboard_only: options.keyboard_only,
+            extended_keyboard: options.extended_keyboard,
             emoji_policy: options.emoji_policy.into(),
             non_ascii_policy: options.non_ascii_policy.into(),
+            preserve_joiners: options.preserve_joiners,
             remove_control_chars: options.remove_control_chars,
             collapse_whitespace: options.collapse_whitespace,
             line_endings: options.normalize_line_endings.into(),
@@ -372,8 +389,10 @@ impl Default for ConfigFile {
 pub fn default_cli_options() -> CleaningOptions {
     CleaningOptions::builder()
         .keyboard_only(true)
+        .extended_keyboard(false)
         .emoji_policy(EmojiPolicy::Drop)
         .non_ascii_policy(NonAsciiPolicy::Transliterate)
+        .preserve_joiners(false)
         .build()
 }
 
@@ -458,6 +477,33 @@ pub fn validate_non_ascii_policy_dependency(
     if non_ascii_policy_specified_by_user && !options.keyboard_only {
         bail!(
             "'--non-ascii-policy' requires keyboard-only mode; set '--keyboard-only true' or remove the non-ASCII policy flag"
+        );
+    }
+    Ok(())
+}
+
+/// Validate that explicit extended keyboard mode is meaningful.
+///
+/// Extended keyboard mode is only effective when keyboard-only mode is enabled.
+///
+/// # Arguments
+/// - `options`: Fully resolved options after config + CLI overrides.
+/// - `extended_keyboard_specified_by_user`: Whether the user explicitly set
+///   extended keyboard mode on this invocation.
+///
+/// # Returns
+/// `Ok(())` when the combination is coherent.
+///
+/// # Errors
+/// Returns an error when extended keyboard mode was set explicitly while
+/// `keyboard_only` is disabled.
+pub fn validate_extended_keyboard_dependency(
+    options: &CleaningOptions,
+    extended_keyboard_specified_by_user: bool,
+) -> Result<()> {
+    if extended_keyboard_specified_by_user && !options.keyboard_only {
+        bail!(
+            "'--extended-keyboard' requires keyboard-only mode; set '--keyboard-only true' or remove the extended keyboard flag"
         );
     }
     Ok(())
@@ -732,6 +778,18 @@ normalise_spaces = false
         options.keyboard_only = false;
         let err = validate_non_ascii_policy_dependency(&options, true)
             .expect_err("explicit non-ASCII policy must require keyboard mode");
+        assert!(
+            err.to_string().contains("keyboard-only mode"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn extended_keyboard_dependency_requires_keyboard_mode_when_explicit() {
+        let mut options = default_cli_options();
+        options.keyboard_only = false;
+        let err = validate_extended_keyboard_dependency(&options, true)
+            .expect_err("explicit extended keyboard mode must require keyboard mode");
         assert!(
             err.to_string().contains("keyboard-only mode"),
             "unexpected error: {err}"

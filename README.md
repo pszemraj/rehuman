@@ -58,6 +58,8 @@ By default, keyboard-only mode emits ASCII-safe output.
 When possible, non-ASCII text is normalized/transliterated (for example
 `"Café"` -> `"Cafe"`, `"Straße"` -> `"Strasse"`).
 Characters without a feasible ASCII mapping are removed.
+You can tune this with `--non-ascii-policy` (`drop`, `fold`, `transliterate`)
+and `--extended-keyboard` for a curated non-ASCII allowlist.
 For docs/source files where Unicode glyphs matter (for example box-drawing diagrams),
 use the CLI with `--preset code-safe` (or `--keyboard-only false`).
 For detailed semantics and option behavior, use the API reference links below.

@@ -193,6 +193,21 @@ fn rehuman_rejects_explicit_non_ascii_policy_without_keyboard_mode() {
 }
 
 #[test]
+fn rehuman_rejects_extended_keyboard_without_keyboard_mode() {
+    let output = run_bin(
+        "rehuman",
+        &["--keyboard-only", "false", "--extended-keyboard", "true"],
+        Some("x"),
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr_text(&output).contains("keyboard-only mode"),
+        "{}",
+        stderr_text(&output)
+    );
+}
+
+#[test]
 fn config_with_unknown_key_is_rejected() {
     let dir = make_tmp_dir();
     let cfg = dir.join("config.toml");
@@ -254,6 +269,25 @@ fn default_keyboard_mode_transliterates_non_decomposing_latin() {
     let out = run_bin("rehuman", &[], Some("Stra\u{00DF}e \u{00BD}\n"));
     assert!(out.status.success(), "{}", stderr_text(&out));
     assert_eq!(stdout_text(&out), "Strasse 1/2\n");
+}
+
+#[test]
+fn extended_keyboard_mode_keeps_curated_symbols() {
+    let default = run_bin(
+        "rehuman",
+        &["--non-ascii-policy", "drop"],
+        Some("€ and ™\n"),
+    );
+    assert!(default.status.success(), "{}", stderr_text(&default));
+    assert_eq!(stdout_text(&default), "and\n");
+
+    let extended = run_bin(
+        "rehuman",
+        &["--non-ascii-policy", "drop", "--extended-keyboard", "true"],
+        Some("€ and ™\n"),
+    );
+    assert!(extended.status.success(), "{}", stderr_text(&extended));
+    assert_eq!(stdout_text(&extended), "€ and\n");
 }
 
 #[test]

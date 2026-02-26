@@ -41,6 +41,7 @@ Runs the default cleaner and returns cleaned text only.
 
 - Default behavior is keyboard-safe output (`keyboard_only=True`).
 - In keyboard-only mode, text is normalized then transliterated to ASCII when feasible (`"Café"` -> `"Cafe"`, `"Straße"` -> `"Strasse"`), then remaining non-ASCII characters are removed.
+- Use `non_ascii_policy="drop"|"fold"|"transliterate"` and `extended_keyboard=True` to control this behavior.
 - Whitespace is not collapsed unless you configure it via `Options` + `Cleaner`.
 
 ```python
@@ -79,8 +80,10 @@ Constructor keyword arguments:
 - `normalize_quotes: bool = True`
 - `normalize_other: bool = True`
 - `keyboard_only: bool = True`
+- `extended_keyboard: bool = False`
 - `keep_emoji: bool = False`
 - `non_ascii_policy: str = "transliterate"` (`"drop"` / `"fold"` / `"transliterate"`)
+- `preserve_joiners: bool = False`
 - `remove_control_chars: bool = True`
 - `collapse_whitespace: bool = False`
 - `line_endings: str | None = None` (`None` / `"auto"` / `"none"` / `"lf"` / `"crlf"` / `"cr"`)
