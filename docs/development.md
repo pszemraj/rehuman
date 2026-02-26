@@ -18,7 +18,7 @@
   [Nordth](https://github.com/Nordth).
 - Unicode-derived tables are generated at build time; no network traffic occurs at runtime.
 
-## Documentation Ownership
+## Documentation Map
 
 - Rust library semantics: [API Reference](api.md)
 - CLI behavior and flags: [CLI Guide](cli.md)

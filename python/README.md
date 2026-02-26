@@ -14,11 +14,7 @@ maturin develop
 
 ## Documentation
 
-Primary Python docs live in this package directory:
-
-- [python/docs/index.md](docs/index.md)
-- [python/docs/api.md](docs/api.md) (Python API semantics)
-- [python/docs/release.md](docs/release.md) (release assets + PyPI automation)
+See [python/docs/index.md](docs/index.md) for the Python docs map.
 
 ## Quickstart
 
