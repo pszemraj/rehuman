@@ -7,6 +7,7 @@ For CLI usage, see [CLI Guide](cli.md). For recipes, see [Examples](examples.md)
 
 - [API Reference](#api-reference)
   - [Core Helpers](#core-helpers)
+  - [Keyboard-Only Behavior](#keyboard-only-behavior)
   - [TextCleaner](#textcleaner)
     - [CleaningOptions Fields](#cleaningoptions-fields)
     - [Builder API](#builder-api)
@@ -29,8 +30,25 @@ let fancy = humanize("“Quote”—and…more");         // -> "\"Quote\"-and..
 
 - `clean` applies the default preset (hidden character removal, spacing fixes) and emits keyboard-safe ASCII (emoji are dropped unless you opt out).
 - `humanize` applies the "humanize" preset (default preset + typographic normalization + whitespace collapsing).
-- In keyboard-only mode, non-ASCII text is first normalized/folded and then transliterated when possible. Examples: `"Café"` becomes `"Cafe"`, `"Straße"` becomes `"Strasse"`.
-- Hidden joiners (ZWJ/ZWNJ) are removed by default; set `preserve_joiners` when script semantics require keeping them.
+- Keyboard-only behavior details are documented in [Keyboard-Only Behavior](#keyboard-only-behavior).
+
+## Keyboard-Only Behavior
+
+When `keyboard_only=true`, the cleaner applies this order:
+
+1. Preserve emoji only if `emoji_policy=Keep`.
+2. Handle non-ASCII text by `non_ascii_policy`:
+   - `Drop`: remove non-ASCII characters.
+   - `Fold`: keep compatibility/decomposition-to-ASCII forms.
+   - `Transliterate`: fold first, then transliterate remaining non-ASCII where feasible.
+3. If `extended_keyboard=true`, keep curated non-ASCII keyboard symbols (for example `€`, `£`, `§`, `…`) without transliterating.
+4. Remove hidden joiners (ZWJ/ZWNJ) unless `preserve_joiners=true`.
+
+Examples:
+
+- `"Café"` -> `"Cafe"`
+- `"Straße"` -> `"Strasse"` (with `Transliterate`)
+- `"½"` -> `"1/2"` (with `Fold` or `Transliterate`)
 
 ## TextCleaner
 

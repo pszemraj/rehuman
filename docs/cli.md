@@ -44,7 +44,7 @@ rehuman --stream < huge.log > huge.clean.log
 ```
 
 > [!NOTE]
-> The CLI shares its defaults with the `rehuman::clean` helper: keyboard-only output with emoji dropped and non-ASCII transliterated when feasible.
+> CLI defaults match `rehuman::clean`. For exact non-ASCII/emoji/joiner behavior, see [docs/api.md](api.md#keyboard-only-behavior).
 
 ### Output Options
 
@@ -54,7 +54,7 @@ rehuman --stream < huge.log > huge.clean.log
 | `--keyboard-only=<bool>`         | Restrict output to ASCII keyboard chars (default `true` for CLI) |
 | `--extended-keyboard=<bool>`     | Allow curated non-ASCII keyboard symbols when keyboard-only is active |
 | `--keep-emoji`                   | Keep emoji even when keyboard-only is active                     |
-| `--non-ascii-policy <mode>`      | `drop`, `fold`, or `transliterate` for non-ASCII handling in keyboard-only mode |
+| `--non-ascii-policy <mode>`      | `drop`, `fold`, or `transliterate` for keyboard-only non-ASCII handling |
 | `--preserve-joiners=<bool>`      | Preserve ZWJ/ZWNJ when hidden-character removal is enabled        |
 | `--unicode-normalization <mode>` | One of `none`, `nfd`, `nfc`, `nfkd`, `nfkc`                      |
 | `--line-endings <style>`         | `lf`, `crlf`, `cr`, or `auto` (preserve input)                   |
