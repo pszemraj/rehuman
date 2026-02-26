@@ -27,7 +27,7 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   resolve-tag:
@@ -331,6 +331,8 @@ jobs:
     name: Finalize Artifacts
     needs: [resolve-tag, build-wheels, build-sdist]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Download wheel artifacts
         uses: actions/download-artifact@v4
