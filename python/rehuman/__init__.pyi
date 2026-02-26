@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+"""Typing stubs for the public ``rehuman`` Python API."""
+
 __version__: str
 HAS_STATS: bool
 HAS_SECURITY: bool
 
-def clean(text: str) -> str: ...
-def humanize(text: str) -> str: ...
+def clean(text: str) -> str:
+    """Clean text with default settings and return cleaned text only."""
+    ...
+
+def humanize(text: str) -> str:
+    """Clean text with the humanize preset and return cleaned text only."""
+    ...
 
 class CleaningResult:
+    """Result returned by ``Cleaner.clean``."""
+
     @property
     def text(self) -> str: ...
     @property
@@ -16,6 +25,8 @@ class CleaningResult:
     def stats(self) -> dict[str, int]: ...
 
 class Options:
+    """Configuration object for ``Cleaner``."""
+
     def __init__(
         self,
         *,
@@ -45,5 +56,7 @@ class Options:
     def code_safe_preset() -> Options: ...
 
 class Cleaner:
+    """Reusable cleaner that returns ``CleaningResult`` objects."""
+
     def __init__(self, options: Options | None = ...) -> None: ...
     def clean(self, text: str) -> CleaningResult: ...

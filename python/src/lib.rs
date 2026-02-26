@@ -55,17 +55,29 @@ fn stats_to_dict<'py>(py: Python<'py>, stats: &CleaningStats) -> PyResult<Bound<
 }
 
 #[pyfunction]
+/// Clean text with the default `rehuman` policy and return cleaned text only.
+///
+/// Use `Cleaner` when you need `changes_made` and per-operation stats.
 fn clean(text: &str) -> String {
     rehuman::clean(text).text.into_owned()
 }
 
 #[pyfunction]
+/// Clean text with the "humanize" preset and return cleaned text only.
+///
+/// This preset applies typographic normalization and whitespace collapsing.
 fn humanize(text: &str) -> String {
     rehuman::humanize(text).text.into_owned()
 }
 
 #[pyclass(from_py_object)]
 #[derive(Clone)]
+/// Result returned by `Cleaner.clean`.
+///
+/// Attributes:
+/// - `text`: cleaned text output
+/// - `changes_made`: total number of transformations
+/// - `stats`: dict of per-operation counters
 struct CleaningResult {
     #[pyo3(get)]
     text: String,
@@ -77,6 +89,7 @@ struct CleaningResult {
 #[pymethods]
 impl CleaningResult {
     #[getter]
+    /// Per-operation counters as `dict[str, int]`.
     fn stats<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         stats_to_dict(py, &self.stats_inner)
     }
@@ -103,6 +116,9 @@ impl CleaningResult {
 
 #[pyclass(from_py_object)]
 #[derive(Clone)]
+/// Cleaning options used by `Cleaner`.
+///
+/// Most callers should start with a preset and then override specific fields.
 struct Options {
     inner: CleaningOptions,
 }
@@ -227,6 +243,7 @@ impl Options {
     }
 
     #[staticmethod]
+    /// Minimal preset: removes hidden characters only.
     fn minimal_preset() -> Self {
         Self {
             inner: CleaningOptions::minimal(),
@@ -234,6 +251,7 @@ impl Options {
     }
 
     #[staticmethod]
+    /// Balanced preset for typical human-authored text.
     fn balanced_preset() -> Self {
         Self {
             inner: CleaningOptions::balanced(),
@@ -241,6 +259,7 @@ impl Options {
     }
 
     #[staticmethod]
+    /// Humanize preset for AI-generated text normalization.
     fn humanize_preset() -> Self {
         Self {
             inner: CleaningOptions::humanize(),
@@ -248,6 +267,7 @@ impl Options {
     }
 
     #[staticmethod]
+    /// Aggressive preset: maximum cleanup, keyboard-only output.
     fn aggressive_preset() -> Self {
         Self {
             inner: CleaningOptions::aggressive(),
@@ -255,6 +275,10 @@ impl Options {
     }
 
     #[staticmethod]
+    /// Code-safe preset for docs/source text.
+    ///
+    /// Keeps emoji and non-ASCII characters, and avoids quote/dash/ellipsis
+    /// rewrites so string literals and examples are not semantically altered.
     fn code_safe_preset() -> Self {
         let builder = CleaningOptions::builder()
             .remove_hidden(true)
@@ -311,6 +335,9 @@ impl Options {
 }
 
 #[pyclass]
+/// Reusable text cleaner.
+///
+/// Construct once and call `clean` repeatedly.
 struct Cleaner {
     inner: TextCleaner,
 }
@@ -319,6 +346,7 @@ struct Cleaner {
 impl Cleaner {
     #[new]
     #[pyo3(signature = (options = None))]
+    /// Build a cleaner with optional `Options`.
     fn new(options: Option<Options>) -> Self {
         let inner_options = options.map(|options| options.inner).unwrap_or_default();
         Self {
@@ -326,6 +354,10 @@ impl Cleaner {
         }
     }
 
+    /// Clean input text and return a `CleaningResult`.
+    ///
+    /// Raises `ValueError` if requested normalization is unavailable in the
+    /// current build configuration.
     fn clean(&self, text: &str) -> PyResult<CleaningResult> {
         let result = self
             .inner
@@ -348,6 +380,7 @@ impl Cleaner {
 }
 
 #[pymodule]
+/// Native extension module backing the public `rehuman` Python package.
 fn _rehuman(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     module.add("HAS_STATS", cfg!(feature = "stats"))?;

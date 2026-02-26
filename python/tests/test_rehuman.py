@@ -141,3 +141,12 @@ def test_module_constants_present():
     assert isinstance(rehuman.HAS_STATS, bool)
     assert isinstance(rehuman.HAS_SECURITY, bool)
     assert isinstance(rehuman.__version__, str)
+
+
+def test_public_docstrings_present():
+    assert rehuman.__doc__
+    assert rehuman.clean.__doc__
+    assert rehuman.humanize.__doc__
+    assert rehuman.Options.__doc__
+    assert rehuman.Cleaner.__doc__
+    assert rehuman.CleaningResult.__doc__
