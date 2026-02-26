@@ -7,9 +7,15 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - ".github/workflows/python-release-artifacts.yml"
+      - ".github/workflows/python-pypi-publish.yml"
+      - ".cargo/**"
+      - "build.rs"
       - "python/**"
+      - "src/**"
+      - "tests/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "rust-toolchain.toml"
   workflow_dispatch:
     inputs:
       tag:
@@ -21,7 +27,12 @@ on:
         required: false
         type: string
       test_mode:
-        description: "Build and validate artifacts without uploading to GitHub Release"
+        description: "Build and validate artifacts without uploading to GitHub Release (recommended)"
+        required: false
+        default: true
+        type: boolean
+      confirm_release_upload:
+        description: "Required for manual release uploads when test_mode=false"
         required: false
         default: false
         type: boolean
@@ -53,6 +64,7 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_REF: ${{ inputs.ref }}
           INPUT_TEST_MODE: ${{ inputs.test_mode }}
+          INPUT_CONFIRM_RELEASE_UPLOAD: ${{ inputs.confirm_release_upload }}
         run: |
           set -euo pipefail
 
@@ -72,14 +84,19 @@ jobs:
               exit 1
             fi
           else
-            raw_tag="${INPUT_TAG}"
+            raw_tag="$(printf '%s' "${INPUT_TAG}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
             test_mode="${INPUT_TEST_MODE}"
+            if [[ "${test_mode}" != "true" && "${INPUT_CONFIRM_RELEASE_UPLOAD}" != "true" ]]; then
+              echo "::error::Manual release upload requires confirm_release_upload=true."
+              exit 1
+            fi
           fi
 
           if [[ -n "${raw_tag}" ]]; then
             candidates=()
-            if [[ "${raw_tag}" == v* ]]; then
-              candidates+=("${raw_tag}" "${raw_tag#v}")
+            if [[ "${raw_tag}" == [Vv]* ]]; then
+              normalized_tag="v${raw_tag#?}"
+              candidates+=("${normalized_tag}" "${normalized_tag#v}")
             else
               candidates+=("v${raw_tag}" "${raw_tag}")
             fi

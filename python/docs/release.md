@@ -19,6 +19,7 @@ Workflow: `.github/workflows/python-release-artifacts.yml`
 Behavior:
 
 - Resolves tags in either format: `vX.Y.Z` or `X.Y.Z`
+- Manual tag inputs are normalized (`vX.Y.Z`, `X.Y.Z`, `VX.Y.Z`, and surrounding whitespace)
 - In release-upload mode, fails early if the tag does not exist or the corresponding GitHub release is missing
 - Validates tag version against:
   - root `Cargo.toml` package version
@@ -32,6 +33,11 @@ Behavior:
 - Re-run behavior:
   - release-upload mode: assets are replaced (`gh release upload --clobber`)
   - test mode: artifacts are published only to the workflow run (`dist-final`)
+
+Manual dispatch safety:
+
+- `test_mode` defaults to `true`.
+- Manual release uploads require both `test_mode=false` and `confirm_release_upload=true`.
 
 Dispatch nuance:
 
@@ -51,10 +57,11 @@ Behavior:
 - Manual prerelease publish requires `allow_prerelease=true`
 - Prerelease status is read from GitHub Release metadata (`prerelease` field)
 - Downloads artifacts from GitHub Release assets (never rebuilds)
-- Waits for wheel/sdist assets to appear on the release before download/publish
-- Requires at least one `.whl` and one `.tar.gz`
+- Waits for complete release assets before publish (`>=4` wheels, `>=1` sdist, and `SHA256SUMS`)
+- Verifies expected wheel platform variants are present before publish
+- Verifies downloaded artifacts against `SHA256SUMS`
 - Publishes with idempotent mode (`skip-existing: true`)
-- Verifies the expected version appears on PyPI after publish
+- Verifies the expected version appears on PyPI with all expected wheel variants + sdist
 
 ## Artifact Matrix
 
@@ -97,6 +104,8 @@ Build/re-attach release artifacts for existing tag:
 
 - Dispatch `python-release-artifacts.yml`
 - Input `tag: v0.1.2` (or `0.1.2`)
+- Input `test_mode: false`
+- Input `confirm_release_upload: true`
 
 Dry-run build on a branch without uploading release assets:
 

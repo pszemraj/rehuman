@@ -24,6 +24,9 @@ jobs:
     name: Publish release artifacts to PyPI
     if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
     runs-on: ubuntu-latest
+    env:
+      # Keep in sync with the release-artifacts wheel matrix.
+      EXPECTED_WHEEL_COUNT: "4"
     steps:
       - name: Resolve release tag and prerelease state
         id: resolve
@@ -34,6 +37,7 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
           ALLOW_PRERELEASE: ${{ inputs.allow_prerelease }}
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -44,15 +48,16 @@ jobs:
             resolved_tag="${RELEASE_TAG}"
             prerelease="${RELEASE_PRERELEASE}"
           else
-            raw_tag="${INPUT_TAG}"
+            raw_tag="$(printf '%s' "${INPUT_TAG}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
             if [[ -z "${raw_tag}" ]]; then
               echo "::error::workflow_dispatch requires a tag input."
               exit 1
             fi
 
             candidates=()
-            if [[ "${raw_tag}" == v* ]]; then
-              candidates+=("${raw_tag}" "${raw_tag#v}")
+            if [[ "${raw_tag}" == [Vv]* ]]; then
+              normalized_tag="v${raw_tag#?}"
+              candidates+=("${normalized_tag}" "${normalized_tag#v}")
             else
               candidates+=("v${raw_tag}" "${raw_tag}")
             fi
@@ -83,6 +88,8 @@ jobs:
       - name: Download release distributions
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_WHEEL_COUNT: ${{ env.EXPECTED_WHEEL_COUNT }}
+        shell: bash
         run: |
           set -euo pipefail
           tag="${{ steps.resolve.outputs.tag }}"
@@ -102,18 +109,24 @@ jobs:
                 --json assets \
                 --jq '[.assets[].name | select(endswith(".tar.gz"))] | length'
             )"
+            sha_count="$(
+              gh release view "${tag}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --json assets \
+                --jq '[.assets[].name | select(. == "SHA256SUMS")] | length'
+            )"
 
-            if (( wheel_count > 0 && sdist_count > 0 )); then
-              echo "Found release distributions for '${tag}' (${wheel_count} wheels, ${sdist_count} sdists)."
+            if (( wheel_count >= EXPECTED_WHEEL_COUNT && sdist_count > 0 && sha_count > 0 )); then
+              echo "Found release distributions for '${tag}' (${wheel_count} wheels, ${sdist_count} sdists, SHA256SUMS present)."
               break
             fi
 
             if (( attempt == max_attempts )); then
-              echo "::error::Timed out waiting for wheel/sdist assets on release '${tag}'."
+              echo "::error::Timed out waiting for complete release assets on '${tag}'. Expected >=${EXPECTED_WHEEL_COUNT} wheels, >=1 sdist, and SHA256SUMS."
               exit 1
             fi
 
-            echo "Attempt ${attempt}/${max_attempts}: wheel/sdist assets not ready yet; retrying in ${sleep_seconds}s..."
+            echo "Attempt ${attempt}/${max_attempts}: release assets not complete yet (wheels=${wheel_count}, sdists=${sdist_count}, sha=${sha_count}); retrying in ${sleep_seconds}s..."
             sleep "${sleep_seconds}"
           done
 
@@ -122,9 +135,12 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --dir dist \
             --pattern "*.whl" \
-            --pattern "*.tar.gz"
+            --pattern "*.tar.gz" \
+            --pattern "SHA256SUMS"
 
       - name: Validate wheel and sdist presence
+        env:
+          EXPECTED_WHEEL_COUNT: ${{ env.EXPECTED_WHEEL_COUNT }}
         shell: bash
         run: |
           set -euo pipefail
@@ -132,15 +148,43 @@ jobs:
 
           wheels=(dist/*.whl)
           sdists=(dist/*.tar.gz)
+          checksums=(dist/SHA256SUMS)
 
-          if (( ${#wheels[@]} == 0 )); then
-            echo "::error::No wheel assets found in GitHub release '${{ steps.resolve.outputs.tag }}'."
+          if (( ${#wheels[@]} < EXPECTED_WHEEL_COUNT )); then
+            echo "::error::Expected at least ${EXPECTED_WHEEL_COUNT} wheels in release '${{ steps.resolve.outputs.tag }}', found ${#wheels[@]}."
             exit 1
           fi
           if (( ${#sdists[@]} == 0 )); then
             echo "::error::No sdist asset found in GitHub release '${{ steps.resolve.outputs.tag }}'."
             exit 1
           fi
+          if (( ${#checksums[@]} != 1 )); then
+            echo "::error::Expected SHA256SUMS in release '${{ steps.resolve.outputs.tag }}'."
+            exit 1
+          fi
+
+          wheel_names="$(printf '%s\n' "${wheels[@]##*/}")"
+          for spec in \
+            "linux-x86_64:manylinux.*x86_64\\.whl$" \
+            "linux-aarch64:manylinux.*aarch64\\.whl$" \
+            "macos-arm64:macosx_.*_arm64\\.whl$" \
+            "windows-x86_64:win_amd64\\.whl$"; do
+            label="${spec%%:*}"
+            pattern="${spec#*:}"
+            if ! printf '%s\n' "${wheel_names}" | grep -Eq "${pattern}"; then
+              echo "::error::Missing expected wheel variant '${label}' in release '${{ steps.resolve.outputs.tag }}'."
+              exit 1
+            fi
+          done
+
+      - name: Verify artifact checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd dist
+            sha256sum -c SHA256SUMS
+          )
 
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
@@ -152,27 +196,49 @@ jobs:
       - name: Verify published version exists on PyPI
         env:
           EXPECTED_VERSION: ${{ steps.resolve.outputs.version }}
+          EXPECTED_WHEEL_COUNT: ${{ env.EXPECTED_WHEEL_COUNT }}
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
           import os
+          import re
           import time
           import urllib.request
 
           expected = os.environ["EXPECTED_VERSION"]
+          expected_wheels = int(os.environ["EXPECTED_WHEEL_COUNT"])
           url = "https://pypi.org/pypi/rehuman/json"
+          wheel_patterns = [
+              re.compile(r"manylinux.*x86_64\.whl$"),
+              re.compile(r"manylinux.*aarch64\.whl$"),
+              re.compile(r"macosx_.*_arm64\.whl$"),
+              re.compile(r"win_amd64\.whl$"),
+          ]
 
           for attempt in range(1, 11):
               with urllib.request.urlopen(url, timeout=15) as response:
                   payload = json.load(response)
               releases = payload.get("releases", {})
               files = releases.get(expected, [])
-              if files:
-                  print(f"Found rehuman {expected} on PyPI ({len(files)} files).")
+              filenames = [item.get("filename", "") for item in files]
+              wheel_files = [name for name in filenames if name.endswith(".whl")]
+              has_sdist = any(name.endswith(".tar.gz") for name in filenames)
+              has_all_wheel_variants = all(
+                  any(pattern.search(name) for name in wheel_files)
+                  for pattern in wheel_patterns
+              )
+
+              if len(wheel_files) >= expected_wheels and has_sdist and has_all_wheel_variants:
+                  print(f"Found complete rehuman {expected} publish on PyPI ({len(files)} files).")
                   break
               if attempt == 10:
-                  raise SystemExit(f"Expected rehuman {expected} to exist on PyPI after publish.")
-              print(f"Attempt {attempt}/10: rehuman {expected} not visible on PyPI yet; retrying...")
+                  raise SystemExit(
+                      f"Expected complete rehuman {expected} publish on PyPI (>= {expected_wheels} wheels + sdist + all expected platforms)."
+                  )
+              print(
+                  f"Attempt {attempt}/10: rehuman {expected} publish incomplete "
+                  f"(wheels={len(wheel_files)}, sdist={has_sdist}, all_variants={has_all_wheel_variants}); retrying..."
+              )
               time.sleep(6)
           PY
