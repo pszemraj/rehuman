@@ -119,7 +119,8 @@ jobs:
       id-token: write
       contents: read
     env:
-      MAX_ASSET_WAIT_ATTEMPTS: "60"
+      # Build workflow fans out across multiple platforms; allow up to 60 minutes.
+      MAX_ASSET_WAIT_ATTEMPTS: "240"
       ASSET_WAIT_SECONDS: "15"
       PYPI_VERIFY_ATTEMPTS: "20"
       PYPI_VERIFY_SLEEP_SECONDS: "10"
@@ -134,29 +135,16 @@ jobs:
           set -euo pipefail
 
           for attempt in $(seq 1 "${MAX_ASSET_WAIT_ATTEMPTS}"); do
-            wheel_count="$(
+            IFS=$'\t' read -r wheel_count sdist_count sha_count manifest_count <<<"$(
               gh release view "${RESOLVED_TAG}" \
                 --repo "${GITHUB_REPOSITORY}" \
                 --json assets \
-                --jq '[.assets[].name | select(test("^rehuman-[0-9].*\\.whl$"))] | length'
-            )"
-            sdist_count="$(
-              gh release view "${RESOLVED_TAG}" \
-                --repo "${GITHUB_REPOSITORY}" \
-                --json assets \
-                --jq '[.assets[].name | select(test("^rehuman-[0-9].*\\.tar\\.gz$"))] | length'
-            )"
-            sha_count="$(
-              gh release view "${RESOLVED_TAG}" \
-                --repo "${GITHUB_REPOSITORY}" \
-                --json assets \
-                --jq '[.assets[].name | select(. == "SHA256SUMS")] | length'
-            )"
-            manifest_count="$(
-              gh release view "${RESOLVED_TAG}" \
-                --repo "${GITHUB_REPOSITORY}" \
-                --json assets \
-                --jq '[.assets[].name | select(. == "PYTHON_DIST_MANIFEST.json")] | length'
+                --jq '[
+                  ([.assets[].name | select(test("^rehuman-[0-9].*\\.whl$"))] | length),
+                  ([.assets[].name | select(test("^rehuman-[0-9].*\\.tar\\.gz$"))] | length),
+                  ([.assets[].name | select(. == "SHA256SUMS")] | length),
+                  ([.assets[].name | select(. == "PYTHON_DIST_MANIFEST.json")] | length)
+                ] | @tsv'
             )"
 
             if (( wheel_count > 0 && sdist_count > 0 && sha_count > 0 && manifest_count > 0 )); then
