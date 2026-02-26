@@ -1,5 +1,8 @@
 # CLI Guide
 
+This document is the canonical source for CLI behavior.
+For transformation semantics and option meanings at the library level, see [API Reference](api.md).
+
 rehuman ships two binaries:
 
 - `rehuman` - cleans input text
@@ -55,10 +58,24 @@ rehuman --stream < huge.log > huge.clean.log
 | `--stats-json`                   | JSON summary to stderr                                           |
 | `--exit-code`                    | Exit with status `1` if changes were made                        |
 
+Additional boolean overrides accepted by both tools:
+
+- `--remove-hidden`
+- `--remove-trailing-whitespace`
+- `--normalize-spaces`
+- `--normalize-dashes`
+- `--normalize-quotes`
+- `--normalize-other`
+- `--remove-control-chars`
+- `--collapse-whitespace`
+
+Each also accepts explicit values (`true/false`, `1/0`, `yes/no`, `on/off`).
+
 ### Processing Modes
 
 - `--stream`: process the input line-by-line (lower memory).
 - `--inplace`: rewrite the input file atomically (uses a temp file).
+- `--stream` and `--inplace` are mutually exclusive.
 
 ### Configuration
 
@@ -78,6 +95,9 @@ Configuration files are stored under the platform config directory:
 Example `config.toml`:
 
 ```toml
+version = 1
+
+[options]
 keyboard_only = true
 emoji_policy = "drop"
 normalize_spaces = true
@@ -86,7 +106,15 @@ unicode_normalization = "nfkc"
 ```
 
 > [!TIP]
-> A ready-to-copy template lives in `config.example.toml` at the project root.
+> A ready-to-copy template lives in [`config.example.toml`](../config.example.toml) at the project root.
+
+> [!IMPORTANT]
+> Unknown config keys are rejected. Typos are errors, not ignored.
+
+### Option Dependency Notes
+
+- `--keep-emoji` / `--emoji-policy` require keyboard-only mode (`--keyboard-only true`).
+- `--print-config` is a standalone mode and conflicts with processing/output flags.
 
 ### File Size Limit
 

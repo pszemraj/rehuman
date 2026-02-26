@@ -1,0 +1,12 @@
+# Rust file line-count policy exceptions.
+schema_version = 1
+target_max_rust_loc = 1000
+
+[[exceptions]]
+path = "src/lib.rs"
+approx_loc = 1305
+reason = "Central text-cleaning engine with tightly coupled hot-path logic and extensive Unicode edge-case unit tests."
+mitigation = [
+  "Extract streaming and classification helpers into dedicated modules.",
+  "Move large unit-test groups to integration tests where practical.",
+]

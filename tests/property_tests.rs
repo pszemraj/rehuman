@@ -1,3 +1,5 @@
+//! Property-based tests for Unicode normalization and cleaning invariants.
+
 use icu_properties::{props, CodePointMapData, CodePointSetData};
 use proptest::prelude::*;
 use rehuman::{clean, is_keyboard_ascii, CleaningOptions, EmojiPolicy, StreamCleaner, TextCleaner};

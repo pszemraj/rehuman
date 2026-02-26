@@ -1,3 +1,8 @@
+//! Shared CLI types and helpers for `rehuman` and `ishuman`.
+//!
+//! This module owns argument/value conversion, config I/O, input/output helpers,
+//! streaming glue, and stats serialization used by both binaries.
+
 use std::fs;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -12,11 +17,14 @@ use rehuman::{
     TextCleaner, UnicodeNormalizationMode,
 };
 
+/// Maximum input size accepted by non-streaming paths.
 pub const MAX_INPUT_BYTES: usize = 5 * 1024 * 1024;
+/// Version identifier for on-disk config schema.
 pub const CONFIG_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+/// CLI/config representation of emoji handling policy.
 pub enum EmojiPolicyArg {
     Drop,
     Keep,
@@ -42,6 +50,7 @@ impl From<EmojiPolicy> for EmojiPolicyArg {
 
 #[derive(Clone, Copy, Debug, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+/// CLI/config representation of line-ending normalization strategy.
 pub enum LineEndingChoice {
     Auto,
     Lf,
@@ -50,6 +59,11 @@ pub enum LineEndingChoice {
 }
 
 impl LineEndingChoice {
+    /// Convert the CLI/config choice into the library line-ending option.
+    ///
+    /// # Returns
+    /// `None` when line endings should be left unchanged (`auto`), otherwise
+    /// the target [`LineEndingStyle`] to enforce.
     pub fn into_option(self) -> Option<LineEndingStyle> {
         match self {
             LineEndingChoice::Auto => None,
@@ -73,6 +87,7 @@ impl From<Option<LineEndingStyle>> for LineEndingChoice {
 
 #[derive(Clone, Copy, Debug, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+/// CLI/config representation of Unicode normalization mode.
 pub enum UnicodeNormalizationChoice {
     None,
     Nfd,
@@ -106,6 +121,7 @@ impl From<UnicodeNormalizationMode> for UnicodeNormalizationChoice {
 }
 
 #[derive(Default)]
+/// Sparse option overrides from CLI flags.
 pub struct PartialOptions {
     pub remove_hidden: Option<bool>,
     pub remove_trailing_whitespace: Option<bool>,
@@ -124,6 +140,7 @@ pub struct PartialOptions {
 }
 
 impl PartialOptions {
+    /// Apply only explicitly provided option values onto a full options struct.
     pub fn apply_to(self, options: &mut CleaningOptions) {
         if let Some(val) = self.remove_hidden {
             options.remove_hidden = val;
@@ -169,7 +186,9 @@ impl PartialOptions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(default)]
+/// Serializable options payload used by the on-disk config file.
 pub struct SerializableOptions {
     pub remove_hidden: bool,
     pub remove_trailing_whitespace: bool,
@@ -194,6 +213,10 @@ impl Default for SerializableOptions {
 }
 
 impl SerializableOptions {
+    /// Convert serializable config values into runtime cleaning options.
+    ///
+    /// # Returns
+    /// A fully materialized [`CleaningOptions`] value for runtime cleaning.
     pub fn to_cleaning_options(&self) -> CleaningOptions {
         let builder = CleaningOptions::builder()
             .remove_hidden(self.remove_hidden)
@@ -213,6 +236,10 @@ impl SerializableOptions {
         builder.build()
     }
 
+    /// Build a serializable snapshot from runtime cleaning options.
+    ///
+    /// # Returns
+    /// A config-ready representation of `options`.
     pub fn from_cleaning_options(options: &CleaningOptions) -> Self {
         Self {
             remove_hidden: options.remove_hidden,
@@ -234,6 +261,8 @@ impl SerializableOptions {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// Top-level on-disk config schema.
 pub struct ConfigFile {
     pub version: u32,
     #[serde(default)]
@@ -249,6 +278,10 @@ impl Default for ConfigFile {
     }
 }
 
+/// Default options used by CLI binaries when no config/overrides are provided.
+///
+/// # Returns
+/// The baseline CLI configuration.
 pub fn default_cli_options() -> CleaningOptions {
     CleaningOptions::builder()
         .keyboard_only(true)
@@ -256,10 +289,25 @@ pub fn default_cli_options() -> CleaningOptions {
         .build()
 }
 
+/// Resolve the platform-specific default config path.
+///
+/// # Returns
+/// The default config file path when platform directories are available.
 pub fn default_config_path() -> Option<PathBuf> {
     ProjectDirs::from("com", "rehuman", "rehuman").map(|dirs| dirs.config_dir().join("config.toml"))
 }
 
+/// Load and validate config file contents.
+///
+/// # Arguments
+/// - `path`: File to read as TOML config.
+///
+/// # Returns
+/// Parsed and validated [`CleaningOptions`].
+///
+/// # Errors
+/// Returns an error if the file cannot be read, parsed, or has an unsupported
+/// schema version.
 pub fn load_config(path: &Path) -> Result<CleaningOptions> {
     let contents = fs::read_to_string(path)?;
     let config: ConfigFile = toml::from_str(&contents)?;
@@ -273,7 +321,46 @@ pub fn load_config(path: &Path) -> Result<CleaningOptions> {
     Ok(config.options.to_cleaning_options())
 }
 
+/// Validate that explicitly requested emoji policy is meaningful.
+///
+/// Emoji policy is only effective when keyboard-only mode is enabled.
+///
+/// # Arguments
+/// - `options`: Fully resolved options after config + CLI overrides.
+/// - `emoji_policy_specified_by_user`: Whether the user explicitly set an
+///   emoji policy flag on this invocation.
+///
+/// # Returns
+/// `Ok(())` when the combination is coherent.
+///
+/// # Errors
+/// Returns an error when emoji policy was set explicitly while
+/// `keyboard_only` is disabled.
+pub fn validate_emoji_policy_dependency(
+    options: &CleaningOptions,
+    emoji_policy_specified_by_user: bool,
+) -> Result<()> {
+    if emoji_policy_specified_by_user && !options.keyboard_only {
+        bail!(
+            "'--keep-emoji'/'--emoji-policy' require keyboard-only mode; set '--keyboard-only true' or remove emoji policy flags"
+        );
+    }
+    Ok(())
+}
+
 #[allow(dead_code)]
+/// Persist config to disk, creating parent directories as needed.
+///
+/// # Arguments
+/// - `path`: Destination config path.
+/// - `options`: Runtime options snapshot to serialize.
+///
+/// # Returns
+/// `Ok(())` once config is written.
+///
+/// # Errors
+/// Returns an error if directories cannot be created, serialization fails, or
+/// the file cannot be written.
 pub fn save_config(path: &Path, options: &CleaningOptions) -> Result<()> {
     let cfg = ConfigFile {
         version: CONFIG_VERSION,
@@ -288,6 +375,18 @@ pub fn save_config(path: &Path, options: &CleaningOptions) -> Result<()> {
     Ok(())
 }
 
+/// Read input text from a path or stdin with size checks.
+///
+/// # Arguments
+/// - `input_path`: Optional input file path; when `None`, reads stdin.
+/// - `max_bytes`: Maximum allowed payload size.
+///
+/// # Returns
+/// The full input text.
+///
+/// # Errors
+/// Returns an error if no stdin data is present, input exceeds `max_bytes`, or
+/// file/stdin reads fail.
 pub fn read_input(input_path: Option<&Path>, max_bytes: usize) -> Result<String> {
     if let Some(path) = input_path {
         let metadata =
@@ -323,6 +422,13 @@ pub fn read_input(input_path: Option<&Path>, max_bytes: usize) -> Result<String>
 }
 
 #[allow(dead_code)]
+/// Write cleaned text to stdout.
+///
+/// # Returns
+/// `Ok(())` when output is written.
+///
+/// # Errors
+/// Returns an error if writing to stdout fails.
 pub fn write_output(result: &CleaningResult<'_>) -> Result<()> {
     let mut stdout = io::stdout().lock();
     stdout
@@ -331,6 +437,7 @@ pub fn write_output(result: &CleaningResult<'_>) -> Result<()> {
     Ok(())
 }
 
+/// Emit human-readable stats to stderr.
 pub fn write_stats(result: &CleaningResult<'_>) {
     let stats = &result.stats;
     eprintln!("changes_made: {}", result.changes_made);
@@ -352,6 +459,13 @@ pub fn write_stats(result: &CleaningResult<'_>) {
     eprintln!("  emojis_dropped: {}", stats.emojis_dropped);
 }
 
+/// Parse a flexible boolean flag value.
+///
+/// # Returns
+/// Parsed boolean value for common truthy/falsey spellings.
+///
+/// # Errors
+/// Returns `Err(String)` for unsupported values.
 pub fn parse_bool_flag(value: &str) -> std::result::Result<bool, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "true" | "t" | "1" | "yes" | "y" | "on" => Ok(true),
@@ -362,12 +476,14 @@ pub fn parse_bool_flag(value: &str) -> std::result::Result<bool, String> {
 
 #[allow(dead_code)]
 #[derive(Debug)]
+/// Aggregate output produced by streaming cleanup.
 pub struct StreamOutcome {
     pub stats: CleaningStats,
     pub changes_made: u64,
 }
 
 #[derive(Serialize)]
+/// JSON-serializable summary payload for stats output.
 pub struct StatsSummary<'a> {
     pub changed: bool,
     pub changes_made: u64,
@@ -375,6 +491,18 @@ pub struct StatsSummary<'a> {
 }
 
 #[allow(dead_code)]
+/// Clean buffered line-stream input and write cleaned output incrementally.
+///
+/// # Arguments
+/// - `reader`: Source stream, read line-by-line.
+/// - `writer`: Destination stream for cleaned chunks.
+/// - `cleaner`: Reusable cleaner configuration.
+///
+/// # Returns
+/// Aggregate streaming stats and total change count.
+///
+/// # Errors
+/// Returns an error if reading, writing, or flushing streams fails.
 pub fn clean_stream<R, W>(
     reader: &mut R,
     writer: &mut W,
@@ -420,6 +548,17 @@ where
     })
 }
 
+/// Serialize JSON stats payload and append a trailing newline.
+///
+/// # Arguments
+/// - `writer`: Destination stream.
+/// - `summary`: Stats payload to serialize.
+///
+/// # Returns
+/// `Ok(())` once JSON payload is written.
+///
+/// # Errors
+/// Returns an error if serialization or writing fails.
 pub fn write_stats_json<W: Write>(writer: &mut W, summary: &StatsSummary) -> Result<()> {
     serde_json::to_writer_pretty(&mut *writer, summary)
         .context("failed to serialize JSON stats")?;
@@ -438,6 +577,33 @@ mod tests {
         assert_eq!(
             cli_defaults, library_defaults,
             "CLI default options should mirror library defaults"
+        );
+    }
+
+    #[test]
+    fn config_rejects_unknown_option_fields() {
+        let bad = r#"
+version = 1
+[options]
+keyboard_only = true
+normalise_spaces = false
+"#;
+        let err = toml::from_str::<ConfigFile>(bad).expect_err("unknown fields should fail");
+        assert!(
+            err.to_string().contains("unknown field"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn emoji_policy_dependency_requires_keyboard_mode_when_explicit() {
+        let mut options = default_cli_options();
+        options.keyboard_only = false;
+        let err = validate_emoji_policy_dependency(&options, true)
+            .expect_err("explicit emoji policy must require keyboard mode");
+        assert!(
+            err.to_string().contains("require keyboard-only mode"),
+            "unexpected error: {err}"
         );
     }
 }

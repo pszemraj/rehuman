@@ -1,3 +1,5 @@
+//! `ishuman` CLI entrypoint and argument routing.
+
 mod common;
 
 use std::io;
@@ -8,8 +10,8 @@ use clap::{ArgAction, Parser};
 
 use common::{
     default_cli_options, default_config_path, load_config, parse_bool_flag, read_input,
-    write_stats, write_stats_json, EmojiPolicyArg, LineEndingChoice, PartialOptions, StatsSummary,
-    UnicodeNormalizationChoice, MAX_INPUT_BYTES,
+    validate_emoji_policy_dependency, write_stats, write_stats_json, EmojiPolicyArg,
+    LineEndingChoice, PartialOptions, StatsSummary, UnicodeNormalizationChoice, MAX_INPUT_BYTES,
 };
 use rehuman::TextCleaner;
 
@@ -34,6 +36,7 @@ fn run() -> Result<i32> {
 
     let overrides = cli.to_partial_options();
     overrides.apply_to(&mut options);
+    validate_emoji_policy_dependency(&options, cli.keep_emoji || cli.emoji_policy.is_some())?;
 
     let input = read_input(cli.input.as_deref(), MAX_INPUT_BYTES)?;
 
@@ -167,5 +170,30 @@ impl Cli {
         }
 
         partial
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn emoji_policy_requires_keyboard_mode_when_explicit() {
+        let cli = Cli::try_parse_from([
+            "ishuman",
+            "--keyboard-only",
+            "false",
+            "--emoji-policy",
+            "drop",
+            "input.txt",
+        ])
+        .expect("args should parse");
+        let mut options = default_cli_options();
+        cli.to_partial_options().apply_to(&mut options);
+        let check = validate_emoji_policy_dependency(
+            &options,
+            cli.keep_emoji || cli.emoji_policy.is_some(),
+        );
+        assert!(check.is_err(), "dependency check should fail");
     }
 }

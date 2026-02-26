@@ -1,0 +1,20 @@
+[package]
+name = "rehuman-python"
+version = "0.1.1"
+edition = "2021"
+rust-version = "1.82"
+publish = false
+
+[lib]
+name = "_rehuman"
+crate-type = ["cdylib"]
+
+[features]
+default = ["unorm", "stats"]
+unorm = ["rehuman/unorm"]
+stats = ["rehuman/stats"]
+security = ["rehuman/security"]
+
+[dependencies]
+pyo3 = { version = "0.28.2", features = ["abi3-py39"] }
+rehuman = { path = "..", default-features = false }

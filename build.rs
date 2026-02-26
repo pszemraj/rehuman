@@ -1,3 +1,5 @@
+//! Build script generating Unicode-derived lookup tables used by `rehuman`.
+
 use std::collections::HashSet;
 use std::env;
 use std::fs::File;

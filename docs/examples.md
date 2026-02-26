@@ -1,6 +1,6 @@
 # Examples
 
-The default cleaner (and CLI) enforces keyboard-only ASCII output, so emoji are removed unless you explicitly relax `keyboard_only` or switch the emoji policy.
+These are focused Rust recipes. Canonical behavior details (defaults/options/error model) live in [API Reference](api.md).
 
 ## Web Scraping Cleanup
 
@@ -15,9 +15,9 @@ let cleaner = TextCleaner::new(CleaningOptions {
     ..CleaningOptions::default()
 });
 
-let scraped = "  “Smart quotes”—with\u{00A0}weird spaces  ";
+let scraped = "“Smart quotes”—with\u{00A0}weird spaces  ";
 let result = cleaner.clean(scraped);
-assert_eq!(result.text, "\"Smart quotes\"-with weird spaces\n");
+assert_eq!(result.text, "\"Smart quotes\"-with weird spaces");
 ```
 
 ## LLM Output Normalization
@@ -31,9 +31,9 @@ let cleaner = TextCleaner::new(CleaningOptions {
     ..CleaningOptions::default()
 });
 
-let llm_output = "Café résumé—très bien!";
+let llm_output = "Ｆｕｌｌｗｉｄｔｈ　text—ok!";
 let result = cleaner.clean(llm_output);
-assert_eq!(result.text, "Cafe resume- tres bien!");
+assert_eq!(result.text, "Fullwidth text-ok!");
 ```
 
 ## Database Key Normalization
@@ -50,9 +50,9 @@ let cleaner = TextCleaner::new(CleaningOptions {
     ..CleaningOptions::default()
 });
 
-let user_input = "  Café  ";
+let user_input = "Ｐｒｏｄｕｃｔ　１２３  ";
 let key = cleaner.clean(user_input).text;
-assert_eq!(key, "Cafe");
+assert_eq!(key, "Product 123");
 ```
 
 ## Preserving Emoji in Keyboard Mode
@@ -66,7 +66,7 @@ let cleaner = TextCleaner::new(CleaningOptions {
     ..CleaningOptions::default()
 });
 
-let text = "Hello 👋 résumé";
+let text = "Hello 👋 world";
 let result = cleaner.clean(text);
-assert_eq!(result.text, "Hello 👋 resume");
+assert_eq!(result.text, "Hello 👋 world");
 ```

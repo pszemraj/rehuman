@@ -1,3 +1,5 @@
+//! `rehuman` CLI entrypoint and argument routing.
+
 mod common;
 
 use std::borrow::Cow;
@@ -11,9 +13,9 @@ use tempfile::NamedTempFile;
 
 use common::{
     clean_stream, default_cli_options, default_config_path, load_config, parse_bool_flag,
-    read_input, save_config, write_output, write_stats, write_stats_json, ConfigFile,
-    EmojiPolicyArg, LineEndingChoice, PartialOptions, SerializableOptions, StatsSummary,
-    UnicodeNormalizationChoice, CONFIG_VERSION, MAX_INPUT_BYTES,
+    read_input, save_config, validate_emoji_policy_dependency, write_output, write_stats,
+    write_stats_json, ConfigFile, EmojiPolicyArg, LineEndingChoice, PartialOptions,
+    SerializableOptions, StatsSummary, UnicodeNormalizationChoice, CONFIG_VERSION, MAX_INPUT_BYTES,
 };
 use rehuman::{CleaningResult, TextCleaner};
 
@@ -46,6 +48,7 @@ fn main() -> Result<()> {
 
     let overrides = cli.to_partial_options();
     overrides.apply_to(&mut options);
+    validate_emoji_policy_dependency(&options, cli.keep_emoji || cli.emoji_policy.is_some())?;
 
     if cli.save_config {
         if let Some(ref path) = config_path {
@@ -107,7 +110,9 @@ fn main() -> Result<()> {
             let permissions = metadata.permissions();
             temp.persist(input_path)
                 .with_context(|| format!("failed to replace {}", input_path.display()))?;
-            let _ = fs::set_permissions(input_path, permissions);
+            fs::set_permissions(input_path, permissions).with_context(|| {
+                format!("failed to restore permissions for {}", input_path.display())
+            })?;
         } else {
             temp.close()
                 .context("failed to remove temporary file after no-op inplace run")?;
@@ -244,7 +249,20 @@ struct Cli {
     save_config: bool,
 
     /// Print the resolved configuration (TOML) and exit.
-    #[arg(long, action = ArgAction::SetTrue)]
+    #[arg(
+        long,
+        action = ArgAction::SetTrue,
+        conflicts_with_all = [
+            "save_config",
+            "reset_config",
+            "stats",
+            "stats_json",
+            "exit_code",
+            "stream",
+            "inplace",
+            "input",
+        ]
+    )]
     print_config: bool,
 
     /// Remove the stored config file before applying overrides.
@@ -264,11 +282,11 @@ struct Cli {
     exit_code: bool,
 
     /// Process the input in a streaming fashion (line by line).
-    #[arg(long, action = ArgAction::SetTrue)]
+    #[arg(long, action = ArgAction::SetTrue, conflicts_with = "inplace")]
     stream: bool,
 
     /// Apply the transformation directly to the input file.
-    #[arg(long = "inplace", action = ArgAction::SetTrue)]
+    #[arg(long = "inplace", action = ArgAction::SetTrue, conflicts_with = "stream")]
     inplace: bool,
 }
 
@@ -298,5 +316,42 @@ impl Cli {
         }
 
         partial
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clap_rejects_stream_and_inplace_together() {
+        let parsed = Cli::try_parse_from(["rehuman", "--stream", "--inplace", "input.txt"]);
+        assert!(parsed.is_err(), "expected clap conflict error");
+    }
+
+    #[test]
+    fn clap_rejects_print_config_with_processing_flags() {
+        let parsed = Cli::try_parse_from(["rehuman", "--print-config", "--stats"]);
+        assert!(parsed.is_err(), "expected clap conflict error");
+    }
+
+    #[test]
+    fn emoji_policy_requires_keyboard_mode_when_explicit() {
+        let cli = Cli::try_parse_from([
+            "rehuman",
+            "--keyboard-only",
+            "false",
+            "--emoji-policy",
+            "drop",
+            "input.txt",
+        ])
+        .expect("args should parse");
+        let mut options = default_cli_options();
+        cli.to_partial_options().apply_to(&mut options);
+        let check = validate_emoji_policy_dependency(
+            &options,
+            cli.keep_emoji || cli.emoji_policy.is_some(),
+        );
+        assert!(check.is_err(), "dependency check should fail");
     }
 }

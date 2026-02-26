@@ -4,8 +4,10 @@
 #   macOS:   ~/Library/Application Support/rehuman/config.toml
 #   Windows: %APPDATA%\rehuman\config.toml
 
+version = 1
+[options]
 keyboard_only = true
-emoji_policy = "drop"            # "drop" or "keep"
+emoji_policy = "drop" # "drop" or "keep"
 remove_hidden = true
 remove_trailing_whitespace = true
 remove_control_chars = true
@@ -16,5 +18,5 @@ normalize_quotes = true
 normalize_other = true
 
 collapse_whitespace = false
-line_endings = "auto"            # "auto", "lf", "crlf", "cr"
-unicode_normalization = "none"   # "none", "nfd", "nfc", "nfkd", "nfkc"
+line_endings = "auto" # "auto", "lf", "crlf", "cr"
+unicode_normalization = "none" # "none", "nfd", "nfc", "nfkd", "nfkc"

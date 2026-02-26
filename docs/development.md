@@ -3,7 +3,7 @@
 ## Roadmap
 
 > [!TIP]
-> Interested in seeing a feature sooner? See [form here](https://github.com/pszemraj/rehuman/compare)
+> Interested in seeing a feature sooner? Open a request at [GitHub Issues](https://github.com/pszemraj/rehuman/issues/new/choose).
 
 - [ ] International keyboard mode with a curated non-ASCII allowlist (€, £, §, …)
 - [ ] Optional transliteration when dropping non-ASCII characters in keyboard-only mode
@@ -17,4 +17,11 @@
   [humanize-ai-lib](https://github.com/Nordth/humanize-ai-lib) by
   [Nordth](https://github.com/Nordth).
 - Unicode-derived tables are generated at build time; no network traffic occurs at runtime.
-- The CLI defaults to keyboard-only output and drops emoji unless explicitly told otherwise.
+
+## Documentation Ownership
+
+- Rust library semantics: [API Reference](api.md)
+- CLI behavior and flags: [CLI Guide](cli.md)
+- Rust usage recipes: [Examples](examples.md)
+- Python package docs: [python/docs/index.md](../python/docs/index.md)
+- Rust file-size exceptions: [docs/dev/loc-exceptions.toml](dev/loc-exceptions.toml)
