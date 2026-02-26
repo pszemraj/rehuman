@@ -1,3 +1,5 @@
+//! End-to-end CLI contract tests for parse-time validation and routing.
+
 use std::env;
 use std::fs;
 use std::io::Write;

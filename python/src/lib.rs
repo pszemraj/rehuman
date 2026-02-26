@@ -1,3 +1,5 @@
+//! PyO3 bindings exposing `rehuman` as the `rehuman._rehuman` extension.
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;

@@ -1,3 +1,5 @@
+//! Basic example showing manual `CleaningOptions` usage.
+
 use rehuman::{
     CleaningOptions, EmojiPolicy, LineEndingStyle, TextCleaner, UnicodeNormalizationMode,
 };

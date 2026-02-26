@@ -1,3 +1,5 @@
+//! `ishuman` CLI entrypoint and argument routing.
+
 mod common;
 
 use std::io;

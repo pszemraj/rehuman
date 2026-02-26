@@ -1,3 +1,5 @@
+//! `rehuman` CLI entrypoint and argument routing.
+
 mod common;
 
 use std::borrow::Cow;

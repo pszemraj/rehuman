@@ -68,7 +68,9 @@ pub struct CleaningResult<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Errors produced by fallible cleaning APIs.
 pub enum CleaningError {
+    /// A Unicode normalization mode was requested without the `unorm` feature.
     NormalizationUnavailable { requested: UnicodeNormalizationMode },
 }
 
@@ -88,6 +90,9 @@ impl std::error::Error for CleaningError {}
 
 impl CleaningStats {
     /// Merge another stats snapshot into this one.
+    ///
+    /// # Arguments
+    /// - `other`: Additional counters to accumulate into `self`.
     #[cfg(feature = "stats")]
     pub fn accumulate(&mut self, other: &CleaningStats) {
         self.hidden_chars_removed = self
@@ -126,6 +131,10 @@ impl CleaningStats {
 
     #[cfg(not(feature = "stats"))]
     #[inline]
+    /// No-op stats accumulation when the `stats` feature is disabled.
+    ///
+    /// # Arguments
+    /// - `_`: Ignored stats payload.
     pub fn accumulate(&mut self, _: &CleaningStats) {
         // No-op when stats are disabled.
     }
@@ -178,6 +187,7 @@ pub struct CleaningOptions {
 }
 
 #[derive(Debug, Clone)]
+/// Builder for [`CleaningOptions`].
 pub struct CleaningOptionsBuilder {
     options: CleaningOptions,
 }
@@ -203,6 +213,10 @@ impl Default for CleaningOptions {
 }
 
 impl CleaningOptions {
+    /// Start a new [`CleaningOptionsBuilder`] with default values.
+    ///
+    /// # Returns
+    /// A builder initialized from [`CleaningOptions::default`].
     pub fn builder() -> CleaningOptionsBuilder {
         CleaningOptionsBuilder {
             options: CleaningOptions::default(),
@@ -210,6 +224,9 @@ impl CleaningOptions {
     }
 
     /// Minimal preset: only removes hidden/invisible chars.
+    ///
+    /// # Returns
+    /// A conservative preset that performs minimal transformations.
     pub fn minimal() -> Self {
         Self {
             remove_hidden: true,
@@ -229,6 +246,9 @@ impl CleaningOptions {
     }
 
     /// Balanced preset for day-to-day text.
+    ///
+    /// # Returns
+    /// A general-purpose preset for normal prose cleanup.
     pub fn balanced() -> Self {
         Self {
             remove_hidden: true,
@@ -248,6 +268,9 @@ impl CleaningOptions {
     }
 
     /// Humanize preset for AI/LLM-ish text.
+    ///
+    /// # Returns
+    /// A preset tuned for typographic normalization and whitespace cleanup.
     pub fn humanize() -> Self {
         Self {
             remove_hidden: true,
@@ -267,6 +290,9 @@ impl CleaningOptions {
     }
 
     /// Aggressive preset: maximum cleanup.
+    ///
+    /// # Returns
+    /// A strict preset that targets keyboard-safe output.
     pub fn aggressive() -> Self {
         Self {
             remove_hidden: true,
@@ -287,72 +313,168 @@ impl CleaningOptions {
 }
 
 impl CleaningOptionsBuilder {
+    /// Set `remove_hidden`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether to remove default-ignorable code points.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn remove_hidden(mut self, value: bool) -> Self {
         self.options.remove_hidden = value;
         self
     }
 
+    /// Set `remove_trailing_whitespace`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether trailing spaces/tabs are trimmed per line.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn remove_trailing_whitespace(mut self, value: bool) -> Self {
         self.options.remove_trailing_whitespace = value;
         self
     }
 
+    /// Set `normalize_spaces`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether Unicode spaces normalize to ASCII space.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn normalize_spaces(mut self, value: bool) -> Self {
         self.options.normalize_spaces = value;
         self
     }
 
+    /// Set `normalize_dashes`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether Unicode dash variants normalize to `-`.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn normalize_dashes(mut self, value: bool) -> Self {
         self.options.normalize_dashes = value;
         self
     }
 
+    /// Set `normalize_quotes`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether curly/Unicode quotes normalize to ASCII quotes.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn normalize_quotes(mut self, value: bool) -> Self {
         self.options.normalize_quotes = value;
         self
     }
 
+    /// Set `normalize_other`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether miscellaneous replacements (for example ellipsis)
+    ///   are applied.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn normalize_other(mut self, value: bool) -> Self {
         self.options.normalize_other = value;
         self
     }
 
+    /// Set `keyboard_only`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether output is restricted to keyboard-safe characters.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn keyboard_only(mut self, value: bool) -> Self {
         self.options.keyboard_only = value;
         self
     }
 
+    /// Set `emoji_policy`.
+    ///
+    /// # Arguments
+    /// - `policy`: Emoji handling policy when `keyboard_only` is enabled.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn emoji_policy(mut self, policy: EmojiPolicy) -> Self {
         self.options.emoji_policy = policy;
         self
     }
 
+    /// Set `remove_control_chars`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether control characters are removed.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn remove_control_chars(mut self, value: bool) -> Self {
         self.options.remove_control_chars = value;
         self
     }
 
+    /// Set `collapse_whitespace`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether consecutive whitespace runs collapse to single spaces.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn collapse_whitespace(mut self, value: bool) -> Self {
         self.options.collapse_whitespace = value;
         self
     }
 
+    /// Set `normalize_line_endings`.
+    ///
+    /// # Arguments
+    /// - `value`: Optional target line-ending style.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn normalize_line_endings(mut self, value: Option<LineEndingStyle>) -> Self {
         self.options.normalize_line_endings = value;
         self
     }
 
+    /// Set `unicode_normalization`.
+    ///
+    /// # Arguments
+    /// - `mode`: Unicode normalization mode to apply before cleaning.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn unicode_normalization(mut self, mode: UnicodeNormalizationMode) -> Self {
         self.options.unicode_normalization = mode;
         self
     }
 
     #[cfg_attr(not(feature = "security"), doc(hidden))]
+    /// Set `strip_bidi_controls`.
+    ///
+    /// # Arguments
+    /// - `value`: Whether bidirectional controls are removed.
+    ///
+    /// # Returns
+    /// Updated builder.
     pub fn strip_bidi_controls(mut self, value: bool) -> Self {
         self.options.strip_bidi_controls = value;
         self
     }
 
+    /// Build an immutable [`CleaningOptions`] value.
+    ///
+    /// # Returns
+    /// Finalized options struct.
     pub fn build(self) -> CleaningOptions {
         self.options
     }
@@ -364,14 +486,40 @@ pub struct TextCleaner {
 }
 
 impl TextCleaner {
+    /// Create a cleaner from explicit options.
+    ///
+    /// # Arguments
+    /// - `options`: Cleaning behavior configuration.
+    ///
+    /// # Returns
+    /// A reusable [`TextCleaner`].
     pub fn new(options: CleaningOptions) -> Self {
         Self { options }
     }
 
+    /// Borrow the cleaner options.
+    ///
+    /// # Returns
+    /// Immutable reference to configured [`CleaningOptions`].
     pub fn options(&self) -> &CleaningOptions {
         &self.options
     }
 
+    /// Clean text and panic on unavailable normalization features.
+    ///
+    /// # Arguments
+    /// - `text`: Input text to normalize.
+    ///
+    /// # Returns
+    /// Cleaned output and stats.
+    ///
+    /// # Errors
+    /// This infallible wrapper does not return errors; use
+    /// [`TextCleaner::try_clean`] for error handling.
+    ///
+    /// # Panics
+    /// Panics when a normalization mode requires the `unorm` feature but it is
+    /// not enabled.
     pub fn clean<'a>(&self, text: &'a str) -> CleaningResult<'a> {
         self.try_clean(text).unwrap_or_else(|err| {
             panic!(
@@ -380,6 +528,23 @@ impl TextCleaner {
         })
     }
 
+    /// Clean text into a caller-provided buffer and panic on unavailable
+    /// normalization features.
+    ///
+    /// # Arguments
+    /// - `text`: Input text to normalize.
+    /// - `out`: Output buffer to reuse.
+    ///
+    /// # Returns
+    /// A result borrowing from `out`.
+    ///
+    /// # Errors
+    /// This infallible wrapper does not return errors; use
+    /// [`TextCleaner::try_clean_into`] for error handling.
+    ///
+    /// # Panics
+    /// Panics when a normalization mode requires the `unorm` feature but it is
+    /// not enabled.
     pub fn clean_into<'output>(
         &self,
         text: &str,
@@ -392,10 +557,33 @@ impl TextCleaner {
         })
     }
 
+    /// Fallible variant of [`TextCleaner::clean`].
+    ///
+    /// # Arguments
+    /// - `text`: Input text to normalize.
+    ///
+    /// # Returns
+    /// Cleaned output and stats.
+    ///
+    /// # Errors
+    /// Returns [`CleaningError::NormalizationUnavailable`] when normalization
+    /// was requested without the `unorm` feature.
     pub fn try_clean<'a>(&self, text: &'a str) -> Result<CleaningResult<'a>, CleaningError> {
         self.try_clean_with_context(text, false)
     }
 
+    /// Fallible variant of [`TextCleaner::clean_into`].
+    ///
+    /// # Arguments
+    /// - `text`: Input text to normalize.
+    /// - `out`: Output buffer to reuse.
+    ///
+    /// # Returns
+    /// A result borrowing from `out`.
+    ///
+    /// # Errors
+    /// Returns [`CleaningError::NormalizationUnavailable`] when normalization
+    /// was requested without the `unorm` feature.
     pub fn try_clean_into<'output>(
         &self,
         text: &str,
@@ -404,6 +592,18 @@ impl TextCleaner {
         self.try_clean_into_with_context(text, out, false)
     }
 
+    /// Clean text while preserving context about previously emitted output.
+    ///
+    /// # Arguments
+    /// - `text`: Input chunk to clean.
+    /// - `has_prior_output`: Whether earlier chunks already emitted output.
+    ///
+    /// # Returns
+    /// Cleaned output and stats.
+    ///
+    /// # Errors
+    /// Returns [`CleaningError::NormalizationUnavailable`] when normalization
+    /// was requested without the `unorm` feature.
     pub fn try_clean_with_context<'a>(
         &self,
         text: &'a str,
@@ -435,6 +635,19 @@ impl TextCleaner {
         })
     }
 
+    /// Buffer-reusing context-aware cleaner.
+    ///
+    /// # Arguments
+    /// - `text`: Input chunk to clean.
+    /// - `out`: Output buffer to reuse.
+    /// - `has_prior_output`: Whether earlier chunks already emitted output.
+    ///
+    /// # Returns
+    /// A result borrowing from `out`.
+    ///
+    /// # Errors
+    /// Returns [`CleaningError::NormalizationUnavailable`] when normalization
+    /// was requested without the `unorm` feature.
     pub fn try_clean_into_with_context<'output>(
         &self,
         text: &str,
@@ -774,11 +987,15 @@ impl TextCleaner {
 }
 
 #[derive(Debug, Clone)]
+/// Summary of cumulative streaming cleanup work.
 pub struct StreamSummary {
+    /// Aggregated counters over all emitted chunks.
     pub stats: CleaningStats,
+    /// Total transformations across all emitted chunks.
     pub changes_made: u64,
 }
 
+/// Incremental cleaner that processes text in newline-delimited chunks.
 pub struct StreamCleaner {
     cleaner: TextCleaner,
     buffer: String,
@@ -788,6 +1005,13 @@ pub struct StreamCleaner {
 }
 
 impl StreamCleaner {
+    /// Construct a streaming cleaner from options.
+    ///
+    /// # Arguments
+    /// - `options`: Cleaning behavior configuration.
+    ///
+    /// # Returns
+    /// A new [`StreamCleaner`].
     pub fn new(options: CleaningOptions) -> Self {
         Self {
             cleaner: TextCleaner::new(options),
@@ -798,6 +1022,13 @@ impl StreamCleaner {
         }
     }
 
+    /// Construct a streaming cleaner from an existing [`TextCleaner`].
+    ///
+    /// # Arguments
+    /// - `cleaner`: Preconfigured text cleaner.
+    ///
+    /// # Returns
+    /// A new [`StreamCleaner`].
     pub fn from_cleaner(cleaner: TextCleaner) -> Self {
         Self {
             cleaner,
@@ -808,6 +1039,19 @@ impl StreamCleaner {
         }
     }
 
+    /// Feed one input chunk and emit cleaned output only after a newline
+    /// boundary is available.
+    ///
+    /// # Arguments
+    /// - `chunk`: Incoming text data.
+    /// - `out`: Reusable output buffer.
+    ///
+    /// # Returns
+    /// `Some(CleaningResult)` when at least one complete line was processed,
+    /// otherwise `None`.
+    ///
+    /// # Panics
+    /// Panics when normalization is requested but the `unorm` feature is disabled.
     pub fn feed<'out>(
         &mut self,
         chunk: &str,
@@ -825,6 +1069,13 @@ impl StreamCleaner {
         Some(self.process_owned_chunk(to_process, out))
     }
 
+    /// Flush remaining buffered text at end-of-stream.
+    ///
+    /// # Arguments
+    /// - `out`: Reusable output buffer.
+    ///
+    /// # Returns
+    /// Final cleaned chunk when buffered content remains, otherwise `None`.
     pub fn finish<'out>(&mut self, out: &'out mut String) -> Option<CleaningResult<'out>> {
         out.clear();
         if self.buffer.is_empty() {
@@ -834,6 +1085,10 @@ impl StreamCleaner {
         Some(self.process_owned_chunk(remainder, out))
     }
 
+    /// Return cumulative stream statistics.
+    ///
+    /// # Returns
+    /// Aggregate counters and total change count.
     pub fn summary(&self) -> StreamSummary {
         StreamSummary {
             stats: self.total_stats.clone(),
@@ -1020,11 +1275,37 @@ fn map_quote(c: char) -> Option<char> {
 }
 
 /// Convenience: clean with default options.
+///
+/// # Arguments
+/// - `text`: Input text to clean.
+///
+/// # Returns
+/// Cleaned output and statistics.
+///
+/// # Errors
+/// This infallible wrapper does not return errors; construct a
+/// [`TextCleaner`] and call [`TextCleaner::try_clean`] for fallible behavior.
+///
+/// # Panics
+/// Panics when normalization is requested but the `unorm` feature is disabled.
 pub fn clean(text: &str) -> CleaningResult<'_> {
     TextCleaner::new(CleaningOptions::default()).clean(text)
 }
 
 /// Convenience: clean with the humanize preset.
+///
+/// # Arguments
+/// - `text`: Input text to clean.
+///
+/// # Returns
+/// Cleaned output and statistics.
+///
+/// # Errors
+/// This infallible wrapper does not return errors; construct a
+/// [`TextCleaner`] and call [`TextCleaner::try_clean`] for fallible behavior.
+///
+/// # Panics
+/// Panics when normalization is requested but the `unorm` feature is disabled.
 pub fn humanize(text: &str) -> CleaningResult<'_> {
     TextCleaner::new(CleaningOptions::humanize()).clean(text)
 }
