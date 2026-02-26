@@ -2,7 +2,7 @@
 
 use std::env;
 use std::fs;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
@@ -65,9 +65,11 @@ fn run_bin(name: &str, args: &[&str], stdin_data: Option<&str>) -> Output {
     let mut child = cmd.spawn().expect("failed to spawn test command");
     if let Some(data) = stdin_data {
         let mut stdin = child.stdin.take().expect("stdin was not piped");
-        stdin
-            .write_all(data.as_bytes())
-            .expect("failed to write stdin");
+        if let Err(err) = stdin.write_all(data.as_bytes()) {
+            if err.kind() != ErrorKind::BrokenPipe {
+                panic!("failed to write stdin: {err}");
+            }
+        }
     }
 
     child
