@@ -124,7 +124,7 @@ let options = CleaningOptions::builder()
     .build();
 ```
 
-The presets (`minimal`, `balanced`, `humanize`, `aggressive`) now spell out every field explicitly, so they serve as documented baselines that you can tweak via the builder.
+The presets (`minimal`, `balanced`, `humanize`, `aggressive`, `code_safe`) now spell out every field explicitly, so they serve as documented baselines that you can tweak via the builder.
 When the optional `security` feature is enabled, you can opt into bidi-control stripping via `.strip_bidi_controls(true)` on the builder.
 
 ### Cleaning Statistics

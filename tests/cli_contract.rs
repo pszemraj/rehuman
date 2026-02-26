@@ -240,6 +240,113 @@ normalise_spaces = false
 }
 
 #[test]
+fn rehuman_save_config_persists_and_print_config_reflects_overrides() {
+    let dir = make_tmp_dir();
+    let cfg = dir.join("config.toml");
+    let cfg_path = cfg.to_str().expect("utf8 path");
+
+    let save = run_bin(
+        "rehuman",
+        &[
+            "--config",
+            cfg_path,
+            "--keyboard-only",
+            "false",
+            "--save-config",
+        ],
+        None,
+    );
+    assert!(save.status.success(), "{}", stderr_text(&save));
+    assert!(
+        cfg.exists(),
+        "config file should be created by --save-config"
+    );
+    let cfg_text = fs::read_to_string(&cfg).expect("failed to read saved config");
+    assert!(
+        cfg_text.contains("keyboard_only = false"),
+        "saved config missing keyboard_only override:\n{cfg_text}"
+    );
+
+    let print = run_bin("rehuman", &["--config", cfg_path, "--print-config"], None);
+    assert!(print.status.success(), "{}", stderr_text(&print));
+    let printed = stdout_text(&print);
+    assert!(
+        printed.contains("keyboard_only = false"),
+        "printed config missing keyboard_only override:\n{printed}"
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn rehuman_reset_config_removes_saved_config_file() {
+    let dir = make_tmp_dir();
+    let cfg = dir.join("config.toml");
+    let cfg_path = cfg.to_str().expect("utf8 path");
+
+    let save = run_bin(
+        "rehuman",
+        &[
+            "--config",
+            cfg_path,
+            "--keyboard-only",
+            "false",
+            "--save-config",
+        ],
+        None,
+    );
+    assert!(save.status.success(), "{}", stderr_text(&save));
+    assert!(cfg.exists(), "config file should exist before reset");
+
+    let reset = run_bin("rehuman", &["--config", cfg_path, "--reset-config"], None);
+    assert!(reset.status.success(), "{}", stderr_text(&reset));
+    assert!(
+        !cfg.exists(),
+        "--reset-config should remove an existing config file"
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn ishuman_respects_explicit_config_file() {
+    let dir = make_tmp_dir();
+    let cfg = dir.join("config.toml");
+    let cfg_path = cfg.to_str().expect("utf8 path");
+
+    let save = run_bin(
+        "rehuman",
+        &[
+            "--config",
+            cfg_path,
+            "--keyboard-only",
+            "false",
+            "--save-config",
+        ],
+        None,
+    );
+    assert!(save.status.success(), "{}", stderr_text(&save));
+
+    let default_check = run_bin("ishuman", &[], Some("😀"));
+    assert_eq!(
+        default_check.status.code(),
+        Some(1),
+        "{}",
+        stderr_text(&default_check)
+    );
+
+    let config_check = run_bin("ishuman", &["--config", cfg_path], Some("😀"));
+    assert_eq!(
+        config_check.status.code(),
+        Some(0),
+        "{}",
+        stderr_text(&config_check)
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn stream_output_matches_buffered_output() {
     let dir = make_tmp_dir();
     let input_path = dir.join("input.txt");

@@ -344,6 +344,32 @@ impl CleaningOptions {
             strip_bidi_controls: true,
         }
     }
+
+    /// Code-safe preset for docs/source-like content.
+    ///
+    /// # Returns
+    /// A preset that preserves semantic punctuation and Unicode glyphs while
+    /// still removing hidden/control noise.
+    pub fn code_safe() -> Self {
+        Self {
+            remove_hidden: true,
+            remove_trailing_whitespace: true,
+            normalize_spaces: true,
+            normalize_dashes: false,
+            normalize_quotes: false,
+            normalize_other: false,
+            keyboard_only: false,
+            extended_keyboard: false,
+            emoji_policy: EmojiPolicy::Keep,
+            non_ascii_policy: NonAsciiPolicy::Transliterate,
+            preserve_joiners: true,
+            remove_control_chars: true,
+            collapse_whitespace: false,
+            normalize_line_endings: None,
+            unicode_normalization: UnicodeNormalizationMode::None,
+            strip_bidi_controls: false,
+        }
+    }
 }
 
 impl CleaningOptionsBuilder {
@@ -1909,5 +1935,27 @@ mod tests {
         let out = cleaner.clean("👍\u{FE0F}");
         assert_eq!(out.text, "");
         assert_eq!(out.stats.emojis_dropped, 1);
+    }
+
+    #[test]
+    fn code_safe_preset_fields_match_cli_contract() {
+        let options = CleaningOptions::code_safe();
+        assert!(options.remove_hidden);
+        assert!(options.remove_trailing_whitespace);
+        assert!(options.normalize_spaces);
+        assert!(!options.normalize_dashes);
+        assert!(!options.normalize_quotes);
+        assert!(!options.normalize_other);
+        assert!(!options.keyboard_only);
+        assert_eq!(options.emoji_policy, EmojiPolicy::Keep);
+        assert_eq!(options.non_ascii_policy, NonAsciiPolicy::Transliterate);
+        assert!(options.preserve_joiners);
+        assert!(options.remove_control_chars);
+        assert!(!options.collapse_whitespace);
+        assert_eq!(options.normalize_line_endings, None);
+        assert_eq!(
+            options.unicode_normalization,
+            UnicodeNormalizationMode::None
+        );
     }
 }
