@@ -29,6 +29,7 @@ Behavior:
 - Builds and uploads release artifacts:
   - Wheels for Linux/macOS/Windows matrix
   - One source distribution (`sdist`)
+  - `PYTHON_DIST_MANIFEST.json` (expected wheel/sdist filenames)
   - Deterministic `SHA256SUMS`
 - Re-run behavior:
   - release-upload mode: assets are replaced (`gh release upload --clobber`)
@@ -43,7 +44,7 @@ Dispatch nuance:
 
 - `workflow_dispatch` is only available when the workflow file exists on the default branch.
 - After that, dispatch can target another ref (`gh workflow run ... --ref <branch>`), which runs that ref's workflow content.
-- Workflow runs are serialized per ref/tag via concurrency groups to avoid parallel asset races.
+- Release asset uploads are serialized per resolved tag to avoid parallel asset races.
 
 ### Workflow 2: Publish to PyPI
 
@@ -58,12 +59,13 @@ Behavior:
 - Manual prerelease publish requires `allow_prerelease=true`
 - Prerelease status is read from GitHub Release metadata (`prerelease` field)
 - Downloads artifacts from GitHub Release assets (never rebuilds)
-- Waits for complete release assets before publish (`>=4` wheels, `>=1` sdist, and `SHA256SUMS`)
-- Downloads only Python package files (`rehuman-[0-9]*.whl`, `rehuman-[0-9]*.tar.gz`) plus `SHA256SUMS` to avoid non-Python release asset collisions.
-- Verifies expected wheel platform variants are present before publish
+- Waits for complete release assets before publish (wheel(s), sdist, `SHA256SUMS`, and `PYTHON_DIST_MANIFEST.json`)
+- Downloads only Python package files (`rehuman-[0-9]*.whl`, `rehuman-[0-9]*.tar.gz`) plus checksum/manifest files to avoid non-Python release asset collisions.
+- Verifies downloaded files against `PYTHON_DIST_MANIFEST.json`
 - Verifies downloaded artifacts against `SHA256SUMS`
+- Copies only wheel/sdist files into a dedicated publish directory (checksum/manifest files are excluded from upload payload)
 - Publishes with idempotent mode (`skip-existing: true`)
-- Verifies the expected version appears on PyPI with all expected wheel variants + sdist
+- Verifies the expected version appears on PyPI with every manifest-listed file
 
 ## Artifact Matrix
 
@@ -130,6 +132,7 @@ Re-publish existing release artifacts to PyPI (idempotent):
 - `No release found`: create/publish GitHub Release for the tag first
 - Version mismatch errors: sync versions in root and `python/` Cargo manifests
 - `No wheel/sdist assets`: run the artifact workflow before publish workflow
+- `Missing dist/PYTHON_DIST_MANIFEST.json`: rerun the artifact workflow so release assets include the manifest
 - PyPI verification timeout: retry publish workflow after a short delay
 - Local smoke run imports wrong module: run install/import checks from repo root (not `python/`) so source-tree files cannot shadow site-packages.
 

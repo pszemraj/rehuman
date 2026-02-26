@@ -69,12 +69,14 @@ jobs:
           INPUT_REF: ${{ inputs.ref }}
           INPUT_TEST_MODE: ${{ inputs.test_mode }}
           INPUT_CONFIRM_RELEASE_UPLOAD: ${{ inputs.confirm_release_upload }}
+        shell: bash
         run: |
           set -euo pipefail
 
           resolved_tag=""
           version=""
           checkout_ref=""
+          raw_ref=""
 
           if [[ "${EVENT_NAME}" == "release" ]]; then
             raw_tag="${RELEASE_TAG}"
@@ -89,6 +91,7 @@ jobs:
             fi
           else
             raw_tag="$(printf '%s' "${INPUT_TAG}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+            raw_ref="$(printf '%s' "${INPUT_REF}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
             test_mode="${INPUT_TEST_MODE}"
             if [[ "${test_mode}" != "true" && "${INPUT_CONFIRM_RELEASE_UPLOAD}" != "true" ]]; then
               echo "::error::Manual release upload requires confirm_release_upload=true."
@@ -123,14 +126,14 @@ jobs:
               echo "::error::Resolved ref '${checkout_ref}' does not exist."
               exit 1
             fi
-          elif [[ "${test_mode}" == "true" && -n "${INPUT_REF}" ]]; then
+          elif [[ "${test_mode}" == "true" && -n "${raw_ref}" ]]; then
             resolved_input_ref=""
             for candidate in \
-              "${INPUT_REF}" \
-              "origin/${INPUT_REF}" \
-              "refs/remotes/origin/${INPUT_REF}" \
-              "refs/heads/${INPUT_REF}" \
-              "refs/tags/${INPUT_REF}"; do
+              "${raw_ref}" \
+              "origin/${raw_ref}" \
+              "refs/remotes/origin/${raw_ref}" \
+              "refs/heads/${raw_ref}" \
+              "refs/tags/${raw_ref}"; do
               if git rev-parse -q --verify "${candidate}^{commit}" >/dev/null; then
                 resolved_input_ref="${candidate}"
                 break
@@ -141,17 +144,26 @@ jobs:
               checkout_ref="$(git rev-parse "${resolved_input_ref}^{commit}")"
             else
               # Support manual test_mode runs with branch names that exist only on origin.
-              remote_sha="$(
+              lsremote_status=0
+              lsremote_output="$(
                 git ls-remote --exit-code origin \
-                  "${INPUT_REF}" \
-                  "refs/heads/${INPUT_REF}" \
-                  "refs/tags/${INPUT_REF}" \
-                  | awk 'NR==1 { print $1 }' || true
-              )"
+                  "${raw_ref}" \
+                  "refs/heads/${raw_ref}" \
+                  "refs/tags/${raw_ref}" 2>&1
+              )" || lsremote_status=$?
+              if (( lsremote_status != 0 && lsremote_status != 2 )); then
+                echo "::error::Failed querying origin for ref '${raw_ref}' (git ls-remote exit ${lsremote_status})."
+                echo "::error::${lsremote_output}"
+                exit 1
+              fi
+              remote_sha=""
+              if (( lsremote_status == 0 )); then
+                remote_sha="$(printf '%s\n' "${lsremote_output}" | awk 'NR==1 { print $1 }')"
+              fi
               if [[ -n "${remote_sha}" ]]; then
                 checkout_ref="${remote_sha}"
               else
-                echo "::error::Ref '${INPUT_REF}' does not exist locally or on origin."
+                echo "::error::Ref '${raw_ref}' does not exist locally or on origin."
                 exit 1
               fi
             fi
@@ -169,14 +181,17 @@ jobs:
         if: ${{ steps.resolve.outputs.test_mode != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          RESOLVED_TAG: ${{ steps.resolve.outputs.tag }}
+        shell: bash
         run: |
           set -euo pipefail
-          gh release view "${{ steps.resolve.outputs.tag }}" --repo "${GITHUB_REPOSITORY}" >/dev/null
+          gh release view "${RESOLVED_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null
 
       - name: Verify root/python versions and PyPI package name
         env:
           EXPECTED_VERSION: ${{ steps.resolve.outputs.version }}
           CHECKOUT_REF: ${{ steps.resolve.outputs.checkout_ref }}
+        shell: bash
         run: |
           set -euo pipefail
           git checkout --detach "${CHECKOUT_REF}"
@@ -352,8 +367,6 @@ jobs:
     name: Finalize Artifacts
     needs: [resolve-tag, build-wheels, build-sdist]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Download wheel artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -381,10 +394,33 @@ jobs:
             echo "::error::No wheel files found in dist/."
             exit 1
           fi
-          if (( ${#sdists[@]} == 0 )); then
-            echo "::error::No sdist file found in dist/."
+          if (( ${#sdists[@]} != 1 )); then
+            echo "::error::Expected exactly one sdist file in dist/, found ${#sdists[@]}."
             exit 1
           fi
+
+      - name: Generate distribution manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          dist = Path("dist")
+          wheels = sorted(p.name for p in dist.glob("rehuman-*.whl"))
+          sdists = sorted(p.name for p in dist.glob("rehuman-*.tar.gz"))
+
+          manifest = {
+              "package": "rehuman",
+              "wheels": wheels,
+              "sdists": sdists,
+          }
+          (dist / "PYTHON_DIST_MANIFEST.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
 
       - name: Generate deterministic SHA256SUMS
         shell: bash
@@ -395,20 +431,37 @@ jobs:
             sha256sum "dist/${file}"
           done > dist/SHA256SUMS
 
-      - name: Upload finalized dist artifact (test mode)
-        if: ${{ needs.resolve-tag.outputs.test_mode == 'true' }}
+      - name: Upload finalized dist artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist-final
           path: dist/*
           if-no-files-found: error
 
+  upload-release-assets:
+    name: Upload Artifacts to GitHub Release
+    needs: [resolve-tag, finalize-artifacts]
+    if: ${{ needs.resolve-tag.outputs.test_mode != 'true' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: python-release-assets-${{ needs.resolve-tag.outputs.tag }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - name: Download finalized dist artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist-final
+          path: dist
+
       - name: Upload artifacts to GitHub release
-        if: ${{ needs.resolve-tag.outputs.test_mode != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          RESOLVED_TAG: ${{ needs.resolve-tag.outputs.tag }}
+        shell: bash
         run: |
           set -euo pipefail
-          gh release upload "${{ needs.resolve-tag.outputs.tag }}" dist/* \
+          gh release upload "${RESOLVED_TAG}" dist/* \
             --clobber \
             --repo "${GITHUB_REPOSITORY}"

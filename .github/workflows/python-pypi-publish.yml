@@ -15,22 +15,18 @@ on:
         default: false
         type: boolean
 
-concurrency:
-  group: python-pypi-publish-${{ github.event.release.tag_name || inputs.tag || github.ref }}
-  cancel-in-progress: false
-
 permissions:
-  id-token: write
   contents: read
 
 jobs:
-  publish:
-    name: Publish release artifacts to PyPI
-    if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
+  resolve:
+    name: Resolve release tag and publish intent
     runs-on: ubuntu-latest
-    env:
-      # Keep in sync with the release-artifacts wheel matrix.
-      EXPECTED_WHEEL_COUNT: "4"
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      should_publish: ${{ steps.resolve.outputs.should_publish }}
     steps:
       - name: Resolve release tag and prerelease state
         id: resolve
@@ -47,14 +43,23 @@ jobs:
 
           resolved_tag=""
           prerelease="false"
+          should_publish="true"
 
           if [[ "${EVENT_NAME}" == "release" ]]; then
-            resolved_tag="${RELEASE_TAG}"
+            resolved_tag="$(printf '%s' "${RELEASE_TAG}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
             prerelease="${RELEASE_PRERELEASE}"
+            if [[ -z "${resolved_tag}" ]]; then
+              echo "::error::release event did not provide github.event.release.tag_name."
+              exit 1
+            fi
+            if [[ "${prerelease}" == "true" ]]; then
+              should_publish="false"
+              echo "::notice::Skipping auto-publish for prerelease tag '${resolved_tag}'."
+            fi
           else
             raw_tag="$(printf '%s' "${INPUT_TAG}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
             if [[ -z "${raw_tag}" ]]; then
-              echo "::error::workflow_dispatch requires a tag input."
+              echo "::error::workflow_dispatch requires a non-empty tag input."
               exit 1
             fi
 
@@ -66,13 +71,25 @@ jobs:
               candidates+=("v${raw_tag}" "${raw_tag}")
             fi
 
-            # For manual runs we detect prerelease from GitHub Release metadata.
+            api_err_file="$(mktemp)"
+            trap 'rm -f "${api_err_file}"' EXIT
             for candidate in "${candidates[@]}"; do
-              if result="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${candidate}" --jq '.tag_name + "|" + (.prerelease|tostring)' 2>/dev/null)"; then
+              if result="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${candidate}" --jq '.tag_name + "|" + (.prerelease|tostring)' 2>"${api_err_file}")"; then
                 IFS='|' read -r resolved_tag prerelease <<<"${result}"
                 break
               fi
+
+              gh_status=$?
+              if grep -Eq 'HTTP 404|Not Found' "${api_err_file}"; then
+                continue
+              fi
+              api_err="$(tr '\n' ' ' <"${api_err_file}")"
+              echo "::error::Failed querying GitHub release metadata for '${candidate}' (gh api exit ${gh_status})."
+              echo "::error::${api_err}"
+              exit 1
             done
+            trap - EXIT
+            rm -f "${api_err_file}"
 
             if [[ -z "${resolved_tag}" ]]; then
               echo "::error::No GitHub release found for '${raw_tag}'."
@@ -88,98 +105,138 @@ jobs:
           echo "tag=${resolved_tag}" >>"${GITHUB_OUTPUT}"
           echo "version=${resolved_tag#v}" >>"${GITHUB_OUTPUT}"
           echo "prerelease=${prerelease}" >>"${GITHUB_OUTPUT}"
+          echo "should_publish=${should_publish}" >>"${GITHUB_OUTPUT}"
 
+  publish:
+    name: Publish release artifacts to PyPI
+    needs: resolve
+    if: ${{ needs.resolve.outputs.should_publish == 'true' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: python-pypi-publish-${{ needs.resolve.outputs.tag }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      MAX_ASSET_WAIT_ATTEMPTS: "60"
+      ASSET_WAIT_SECONDS: "15"
+      PYPI_VERIFY_ATTEMPTS: "20"
+      PYPI_VERIFY_SLEEP_SECONDS: "10"
+      RESOLVED_TAG: ${{ needs.resolve.outputs.tag }}
+      EXPECTED_VERSION: ${{ needs.resolve.outputs.version }}
+    steps:
       - name: Download release distributions
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_WHEEL_COUNT: ${{ env.EXPECTED_WHEEL_COUNT }}
         shell: bash
         run: |
           set -euo pipefail
-          tag="${{ steps.resolve.outputs.tag }}"
-          max_attempts=40
-          sleep_seconds=15
 
-          for attempt in $(seq 1 "${max_attempts}"); do
+          for attempt in $(seq 1 "${MAX_ASSET_WAIT_ATTEMPTS}"); do
             wheel_count="$(
-              gh release view "${tag}" \
+              gh release view "${RESOLVED_TAG}" \
                 --repo "${GITHUB_REPOSITORY}" \
                 --json assets \
                 --jq '[.assets[].name | select(test("^rehuman-[0-9].*\\.whl$"))] | length'
             )"
             sdist_count="$(
-              gh release view "${tag}" \
+              gh release view "${RESOLVED_TAG}" \
                 --repo "${GITHUB_REPOSITORY}" \
                 --json assets \
                 --jq '[.assets[].name | select(test("^rehuman-[0-9].*\\.tar\\.gz$"))] | length'
             )"
             sha_count="$(
-              gh release view "${tag}" \
+              gh release view "${RESOLVED_TAG}" \
                 --repo "${GITHUB_REPOSITORY}" \
                 --json assets \
                 --jq '[.assets[].name | select(. == "SHA256SUMS")] | length'
             )"
+            manifest_count="$(
+              gh release view "${RESOLVED_TAG}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --json assets \
+                --jq '[.assets[].name | select(. == "PYTHON_DIST_MANIFEST.json")] | length'
+            )"
 
-            if (( wheel_count >= EXPECTED_WHEEL_COUNT && sdist_count > 0 && sha_count > 0 )); then
-              echo "Found release distributions for '${tag}' (${wheel_count} wheels, ${sdist_count} sdists, SHA256SUMS present)."
+            if (( wheel_count > 0 && sdist_count > 0 && sha_count > 0 && manifest_count > 0 )); then
+              echo "Found release distributions for '${RESOLVED_TAG}' (${wheel_count} wheels, ${sdist_count} sdists, SHA256SUMS + manifest present)."
               break
             fi
 
-            if (( attempt == max_attempts )); then
-              echo "::error::Timed out waiting for complete release assets on '${tag}'. Expected >=${EXPECTED_WHEEL_COUNT} wheels, >=1 sdist, and SHA256SUMS."
+            if (( attempt == MAX_ASSET_WAIT_ATTEMPTS )); then
+              echo "::error::Timed out waiting for complete release assets on '${RESOLVED_TAG}'. Expected wheels + sdist + SHA256SUMS + PYTHON_DIST_MANIFEST.json."
               exit 1
             fi
 
-            echo "Attempt ${attempt}/${max_attempts}: release assets not complete yet (wheels=${wheel_count}, sdists=${sdist_count}, sha=${sha_count}); retrying in ${sleep_seconds}s..."
-            sleep "${sleep_seconds}"
+            echo "Attempt ${attempt}/${MAX_ASSET_WAIT_ATTEMPTS}: release assets not complete yet (wheels=${wheel_count}, sdists=${sdist_count}, sha=${sha_count}, manifest=${manifest_count}); retrying in ${ASSET_WAIT_SECONDS}s..."
+            sleep "${ASSET_WAIT_SECONDS}"
           done
 
           mkdir -p dist
-          gh release download "${tag}" \
+          gh release download "${RESOLVED_TAG}" \
             --repo "${GITHUB_REPOSITORY}" \
             --dir dist \
             --pattern "rehuman-[0-9]*.whl" \
             --pattern "rehuman-[0-9]*.tar.gz" \
-            --pattern "SHA256SUMS"
+            --pattern "SHA256SUMS" \
+            --pattern "PYTHON_DIST_MANIFEST.json"
 
-      - name: Validate wheel and sdist presence
-        env:
-          EXPECTED_WHEEL_COUNT: ${{ env.EXPECTED_WHEEL_COUNT }}
+      - name: Validate distribution set from manifest
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import sys
 
-          wheels=(dist/rehuman-[0-9]*.whl)
-          sdists=(dist/rehuman-[0-9]*.tar.gz)
-          checksums=(dist/SHA256SUMS)
+          dist = Path("dist")
+          manifest_path = dist / "PYTHON_DIST_MANIFEST.json"
+          sha_path = dist / "SHA256SUMS"
+          errors = []
 
-          if (( ${#wheels[@]} < EXPECTED_WHEEL_COUNT )); then
-            echo "::error::Expected at least ${EXPECTED_WHEEL_COUNT} wheels in release '${{ steps.resolve.outputs.tag }}', found ${#wheels[@]}."
-            exit 1
-          fi
-          if (( ${#sdists[@]} == 0 )); then
-            echo "::error::No sdist asset found in GitHub release '${{ steps.resolve.outputs.tag }}'."
-            exit 1
-          fi
-          if (( ${#checksums[@]} != 1 )); then
-            echo "::error::Expected SHA256SUMS in release '${{ steps.resolve.outputs.tag }}'."
-            exit 1
-          fi
+          if not manifest_path.exists():
+              errors.append("Missing dist/PYTHON_DIST_MANIFEST.json.")
+          if not sha_path.exists():
+              errors.append("Missing dist/SHA256SUMS.")
 
-          wheel_names="$(printf '%s\n' "${wheels[@]##*/}")"
-          for spec in \
-            "linux-x86_64:manylinux.*x86_64\\.whl$" \
-            "linux-aarch64:manylinux.*aarch64\\.whl$" \
-            "macos-arm64:macosx_.*_arm64\\.whl$" \
-            "windows-x86_64:win_amd64\\.whl$"; do
-            label="${spec%%:*}"
-            pattern="${spec#*:}"
-            if ! printf '%s\n' "${wheel_names}" | grep -Eq "${pattern}"; then
-              echo "::error::Missing expected wheel variant '${label}' in release '${{ steps.resolve.outputs.tag }}'."
-              exit 1
-            fi
-          done
+          if errors:
+              for error in errors:
+                  print(f"::error::{error}", file=sys.stderr)
+              raise SystemExit(1)
+
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          if manifest.get("package") != "rehuman":
+              errors.append("Manifest package field must be 'rehuman'.")
+
+          expected_wheels = manifest.get("wheels", [])
+          expected_sdists = manifest.get("sdists", [])
+          if not isinstance(expected_wheels, list) or not isinstance(expected_sdists, list):
+              errors.append("Manifest wheels/sdists must be JSON arrays.")
+          if len(expected_wheels) == 0:
+              errors.append("Manifest must list at least one wheel.")
+          if len(expected_sdists) != 1:
+              errors.append(f"Manifest must list exactly one sdist, found {len(expected_sdists)}.")
+
+          expected_files = expected_wheels + expected_sdists
+          present = {p.name for p in dist.iterdir() if p.is_file()}
+
+          for name in expected_files:
+              if not name.startswith("rehuman-"):
+                  errors.append(f"Unexpected non-rehuman artifact name in manifest: {name!r}.")
+              if name not in present:
+                  errors.append(f"Manifest-listed file is missing from dist/: {name}.")
+
+          if errors:
+              for error in errors:
+                  print(f"::error::{error}", file=sys.stderr)
+              raise SystemExit(1)
+
+          print(
+              f"Validated manifest for {len(expected_wheels)} wheels and {len(expected_sdists)} sdist."
+          )
+          PY
 
       - name: Verify artifact checksums
         shell: bash
@@ -190,59 +247,66 @@ jobs:
             sha256sum -c SHA256SUMS
           )
 
+      - name: Prepare publish payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+
+          dist = Path("dist")
+          publish = Path("publish-dist")
+          publish.mkdir(parents=True, exist_ok=True)
+
+          manifest = json.loads((dist / "PYTHON_DIST_MANIFEST.json").read_text(encoding="utf-8"))
+          for name in manifest["wheels"] + manifest["sdists"]:
+              shutil.copy2(dist / name, publish / name)
+          PY
+
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # release/v1
         with:
-          packages-dir: dist
+          packages-dir: publish-dist
           skip-existing: true
           print-hash: true
 
       - name: Verify published version exists on PyPI
-        env:
-          EXPECTED_VERSION: ${{ steps.resolve.outputs.version }}
-          EXPECTED_WHEEL_COUNT: ${{ env.EXPECTED_WHEEL_COUNT }}
+        shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
           import os
-          import re
           import time
           import urllib.request
+          from pathlib import Path
 
           expected = os.environ["EXPECTED_VERSION"]
-          expected_wheels = int(os.environ["EXPECTED_WHEEL_COUNT"])
+          verify_attempts = int(os.environ["PYPI_VERIFY_ATTEMPTS"])
+          verify_sleep = int(os.environ["PYPI_VERIFY_SLEEP_SECONDS"])
+          manifest = json.loads(Path("dist/PYTHON_DIST_MANIFEST.json").read_text(encoding="utf-8"))
+          expected_files = sorted(set(manifest["wheels"] + manifest["sdists"]))
           url = "https://pypi.org/pypi/rehuman/json"
-          wheel_patterns = [
-              re.compile(r"manylinux.*x86_64\.whl$"),
-              re.compile(r"manylinux.*aarch64\.whl$"),
-              re.compile(r"macosx_.*_arm64\.whl$"),
-              re.compile(r"win_amd64\.whl$"),
-          ]
 
-          for attempt in range(1, 21):
+          for attempt in range(1, verify_attempts + 1):
               with urllib.request.urlopen(url, timeout=15) as response:
                   payload = json.load(response)
               releases = payload.get("releases", {})
               files = releases.get(expected, [])
-              filenames = [item.get("filename", "") for item in files]
-              wheel_files = [name for name in filenames if name.endswith(".whl")]
-              has_sdist = any(name.endswith(".tar.gz") for name in filenames)
-              has_all_wheel_variants = all(
-                  any(pattern.search(name) for name in wheel_files)
-                  for pattern in wheel_patterns
-              )
+              published_names = {item.get("filename", "") for item in files}
+              missing = [name for name in expected_files if name not in published_names]
 
-              if len(wheel_files) >= expected_wheels and has_sdist and has_all_wheel_variants:
+              if not missing:
                   print(f"Found complete rehuman {expected} publish on PyPI ({len(files)} files).")
                   break
-              if attempt == 20:
+              if attempt == verify_attempts:
                   raise SystemExit(
-                      f"Expected complete rehuman {expected} publish on PyPI (>= {expected_wheels} wheels + sdist + all expected platforms)."
+                      f"Expected complete rehuman {expected} publish on PyPI. Missing files: {missing}"
                   )
               print(
-                  f"Attempt {attempt}/20: rehuman {expected} publish incomplete "
-                  f"(wheels={len(wheel_files)}, sdist={has_sdist}, all_variants={has_all_wheel_variants}); retrying..."
+                  f"Attempt {attempt}/{verify_attempts}: missing {len(missing)} expected files on PyPI; retrying in {verify_sleep}s..."
               )
-              time.sleep(10)
+              time.sleep(verify_sleep)
           PY
