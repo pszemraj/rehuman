@@ -111,6 +111,7 @@ Re-publish existing release artifacts to PyPI (idempotent):
 - Version mismatch errors: sync versions in root and `python/` Cargo manifests
 - `No wheel/sdist assets`: run the artifact workflow before publish workflow
 - PyPI verification timeout: retry publish workflow after a short delay
+- Local smoke run imports wrong module: run install/import checks from repo root (not `python/`) so source-tree files cannot shadow site-packages.
 
 ## Future Hardening TODOs
 
