@@ -103,6 +103,7 @@ Dry-run build on a branch without uploading release assets:
 - Input `test_mode: true`
 - Input `ref: feat/builds` (or another branch/ref)
 - Leave `tag` empty
+- `ref` accepts branch/tag/refname and resolves against both local checkout refs and `origin/*`.
 
 Re-publish existing release artifacts to PyPI (idempotent):
 

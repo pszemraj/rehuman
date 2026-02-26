@@ -103,11 +103,37 @@ jobs:
               exit 1
             fi
           elif [[ "${test_mode}" == "true" && -n "${INPUT_REF}" ]]; then
-            if ! git rev-parse -q --verify "${INPUT_REF}^{commit}" >/dev/null; then
-              echo "::error::Ref '${INPUT_REF}' does not exist."
-              exit 1
+            resolved_input_ref=""
+            for candidate in \
+              "${INPUT_REF}" \
+              "origin/${INPUT_REF}" \
+              "refs/remotes/origin/${INPUT_REF}" \
+              "refs/heads/${INPUT_REF}" \
+              "refs/tags/${INPUT_REF}"; do
+              if git rev-parse -q --verify "${candidate}^{commit}" >/dev/null; then
+                resolved_input_ref="${candidate}"
+                break
+              fi
+            done
+
+            if [[ -n "${resolved_input_ref}" ]]; then
+              checkout_ref="$(git rev-parse "${resolved_input_ref}^{commit}")"
+            else
+              # Support manual test_mode runs with branch names that exist only on origin.
+              remote_sha="$(
+                git ls-remote --exit-code origin \
+                  "${INPUT_REF}" \
+                  "refs/heads/${INPUT_REF}" \
+                  "refs/tags/${INPUT_REF}" \
+                  | awk 'NR==1 { print $1 }' || true
+              )"
+              if [[ -n "${remote_sha}" ]]; then
+                checkout_ref="${remote_sha}"
+              else
+                echo "::error::Ref '${INPUT_REF}' does not exist locally or on origin."
+                exit 1
+              fi
             fi
-            checkout_ref="${INPUT_REF}"
           else
             echo "::error::Provide a tag, or run with test_mode=true and a valid ref input."
             exit 1
