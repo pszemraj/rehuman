@@ -5,7 +5,7 @@ resolver = "2"
 
 [package]
 name = "rehuman"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.82"
 authors = ["Peter Szemraj <peterszemraj+dev@gmail.com>"]

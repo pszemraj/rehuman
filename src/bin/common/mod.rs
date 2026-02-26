@@ -169,6 +169,7 @@ impl PartialOptions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(default)]
 pub struct SerializableOptions {
     pub remove_hidden: bool,
@@ -234,6 +235,7 @@ impl SerializableOptions {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConfigFile {
     pub version: u32,
     #[serde(default)]
@@ -271,6 +273,18 @@ pub fn load_config(path: &Path) -> Result<CleaningOptions> {
         );
     }
     Ok(config.options.to_cleaning_options())
+}
+
+pub fn validate_emoji_policy_dependency(
+    options: &CleaningOptions,
+    emoji_policy_specified_by_user: bool,
+) -> Result<()> {
+    if emoji_policy_specified_by_user && !options.keyboard_only {
+        bail!(
+            "'--keep-emoji'/'--emoji-policy' require keyboard-only mode; set '--keyboard-only true' or remove emoji policy flags"
+        );
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]
@@ -438,6 +452,33 @@ mod tests {
         assert_eq!(
             cli_defaults, library_defaults,
             "CLI default options should mirror library defaults"
+        );
+    }
+
+    #[test]
+    fn config_rejects_unknown_option_fields() {
+        let bad = r#"
+version = 1
+[options]
+keyboard_only = true
+normalise_spaces = false
+"#;
+        let err = toml::from_str::<ConfigFile>(bad).expect_err("unknown fields should fail");
+        assert!(
+            err.to_string().contains("unknown field"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn emoji_policy_dependency_requires_keyboard_mode_when_explicit() {
+        let mut options = default_cli_options();
+        options.keyboard_only = false;
+        let err = validate_emoji_policy_dependency(&options, true)
+            .expect_err("explicit emoji policy must require keyboard mode");
+        assert!(
+            err.to_string().contains("require keyboard-only mode"),
+            "unexpected error: {err}"
         );
     }
 }
