@@ -1,6 +1,6 @@
 # Examples
 
-These are focused Rust recipes. Canonical behavior details (defaults/options/error model) live in [API Reference](api.md).
+These are focused Rust recipes. For defaults, options, and error behavior, see [API Reference](api.md).
 
 ## Web Scraping Cleanup
 

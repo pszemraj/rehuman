@@ -1,6 +1,6 @@
 # Python Release Automation
 
-Canonical reference for Python wheel/sdist release automation for `rehuman`.
+Reference for Python wheel/sdist release automation for `rehuman`.
 
 ## Trigger Model
 

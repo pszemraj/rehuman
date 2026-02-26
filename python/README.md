@@ -17,7 +17,7 @@ maturin develop
 Primary Python docs live in this package directory:
 
 - [python/docs/index.md](docs/index.md)
-- [python/docs/api.md](docs/api.md) (canonical Python API semantics)
+- [python/docs/api.md](docs/api.md) (Python API semantics)
 - [python/docs/release.md](docs/release.md) (release assets + PyPI automation)
 
 ## Quickstart

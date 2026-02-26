@@ -1,6 +1,6 @@
 # API Reference
 
-This document is the canonical source for Rust library behavior (`rehuman` crate): defaults, options, presets, stats, and error handling.
+This document describes Rust library behavior (`rehuman` crate): defaults, options, presets, stats, and error handling.
 For CLI usage, see [CLI Guide](cli.md). For recipes, see [Examples](examples.md).
 
 ---

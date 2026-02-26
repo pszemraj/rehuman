@@ -1,6 +1,6 @@
 # CLI Guide
 
-This document is the canonical source for CLI behavior.
+This document describes CLI behavior.
 For transformation semantics and option meanings at the library level, see [API Reference](api.md).
 
 rehuman ships two binaries:

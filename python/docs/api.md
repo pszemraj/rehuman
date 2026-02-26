@@ -1,6 +1,6 @@
 # Python API Reference
 
-Canonical behavior reference for the `rehuman` Python package.
+Behavior reference for the `rehuman` Python package.
 
 ## Module
 

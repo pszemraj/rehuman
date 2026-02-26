@@ -1,6 +1,6 @@
 # Python Docs
 
-This directory is the source of truth for Python package documentation (`import rehuman`).
+This directory contains Python package documentation for `import rehuman`.
 
 ## Docs Map
 
