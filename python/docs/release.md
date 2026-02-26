@@ -60,11 +60,12 @@ Behavior:
 Current Python wheel targets:
 
 - Linux: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`
-- macOS: `x86_64-apple-darwin`, `aarch64-apple-darwin`
+- macOS: `aarch64-apple-darwin`
 - Windows: `x86_64-pc-windows-msvc`
 
 Known limitation:
 
+- macOS x86_64 wheels are not built in CI currently (hosted runner availability constraint).
 - Windows ARM64 wheels are not built yet.
 
 ## Why sdist Is Included
@@ -122,4 +123,5 @@ Re-publish existing release artifacts to PyPI (idempotent):
 ## Future Hardening TODOs
 
 - Evaluate workspace-level version inheritance to reduce duplicate version bumps.
+- Revisit macOS x86_64 wheel coverage (either hosted Intel runner support or universal2 strategy).
 - Consider adding Windows ARM64 wheel builds once runner support is stable.
