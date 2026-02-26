@@ -24,4 +24,4 @@
 - CLI behavior and flags: [CLI Guide](cli.md)
 - Rust usage recipes: [Examples](examples.md)
 - Python package docs: [python/docs/index.md](../python/docs/index.md)
-- Rust file-size exceptions: [docs/dev/loc-exceptions.md](dev/loc-exceptions.md)
+- Rust file-size exceptions: [docs/dev/loc-exceptions.toml](dev/loc-exceptions.toml)
