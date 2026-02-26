@@ -22,7 +22,7 @@ See [python/docs/index.md](docs/index.md) for the Python docs map.
 import rehuman
 
 # Top-level helpers return cleaned text only.
-# clean(): keyboard-safe default output
+# clean(): keyboard-safe default output (with transliteration when feasible)
 # humanize(): normalized, human-readable Unicode output
 text = "A   B 👍 Café"
 assert rehuman.clean(text) == "A   B Cafe"

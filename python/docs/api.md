@@ -40,7 +40,7 @@ assert rehuman.humanize(text) == "A B 👍 Café"
 Runs the default cleaner and returns cleaned text only.
 
 - Default behavior is keyboard-safe output (`keyboard_only=True`).
-- In keyboard-only mode, decomposable characters are folded to ASCII when possible (`"Café"` -> `"Cafe"`); characters with no ASCII fold are removed.
+- In keyboard-only mode, text is normalized then transliterated to ASCII when feasible (`"Café"` -> `"Cafe"`, `"Straße"` -> `"Strasse"`), then remaining non-ASCII characters are removed.
 - Whitespace is not collapsed unless you configure it via `Options` + `Cleaner`.
 
 ```python
@@ -80,6 +80,7 @@ Constructor keyword arguments:
 - `normalize_other: bool = True`
 - `keyboard_only: bool = True`
 - `keep_emoji: bool = False`
+- `non_ascii_policy: str = "transliterate"` (`"drop"` / `"fold"` / `"transliterate"`)
 - `remove_control_chars: bool = True`
 - `collapse_whitespace: bool = False`
 - `line_endings: str | None = None` (`None` / `"auto"` / `"none"` / `"lf"` / `"crlf"` / `"cr"`)
@@ -122,12 +123,13 @@ Stats keys:
 - `control_chars_removed`
 - `line_endings_normalized`
 - `non_keyboard_removed`
+- `non_keyboard_transliterated`
 - `emojis_dropped`
 - `bidi_controls_removed` (when `rehuman.HAS_SECURITY` is `True`)
 
 ## Errors
 
-- Invalid option strings (for `line_endings` / `unicode_normalization`) raise `ValueError`.
+- Invalid option strings (for `line_endings` / `unicode_normalization` / `non_ascii_policy`) raise `ValueError`.
 - Cleaner runtime errors from unavailable normalization features are surfaced as `ValueError`.
 
 ## Docstrings & Typing

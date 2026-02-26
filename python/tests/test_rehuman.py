@@ -80,6 +80,7 @@ def test_stats_contains_expected_keys() -> None:
         "control_chars_removed",
         "line_endings_normalized",
         "non_keyboard_removed",
+        "non_keyboard_transliterated",
         "emojis_dropped",
     }
     assert keys.issubset(stats.keys())
@@ -99,6 +100,12 @@ def test_invalid_line_endings_raises_value_error() -> None:
         rehuman.Options(line_endings="bogus")
 
 
+def test_invalid_non_ascii_policy_raises_value_error() -> None:
+    """Invalid non-ASCII policy is rejected with `ValueError`."""
+    with pytest.raises(ValueError, match="invalid non-ASCII policy"):
+        rehuman.Options(non_ascii_policy="bogus")
+
+
 def test_line_endings_lf() -> None:
     """Line-ending normalization can force LF output."""
     options = rehuman.Options(line_endings="lf")
@@ -111,6 +118,24 @@ def test_unorm_is_available_by_default() -> None:
     options = rehuman.Options(keyboard_only=False, unicode_normalization="nfkc")
     result = rehuman.Cleaner(options).clean("e\u0301")
     assert result.text == "\u00e9"
+
+
+def test_keyboard_only_transliteration_policy_modes() -> None:
+    """Keyboard-only mode supports drop, fold, and transliterate policies."""
+    drop = rehuman.Cleaner(
+        rehuman.Options(keyboard_only=True, non_ascii_policy="drop")
+    ).clean("Stra\u00dfe \u00bd \u2122")
+    fold = rehuman.Cleaner(
+        rehuman.Options(keyboard_only=True, non_ascii_policy="fold")
+    ).clean("Stra\u00dfe \u00bd \u2122")
+    transliterate = rehuman.Cleaner(
+        rehuman.Options(keyboard_only=True, non_ascii_policy="transliterate")
+    ).clean("Stra\u00dfe \u00bd \u2122")
+
+    assert drop.text == "Strae"
+    assert fold.text == "Strae 1/2 TM"
+    assert transliterate.text == "Strasse 1/2 TM"
+    assert transliterate.stats["non_keyboard_transliterated"] >= 3
 
 
 def test_presets_minimal_balanced_humanize_aggressive() -> None:
@@ -147,6 +172,7 @@ def test_options_repr_and_result_equality_are_value_based() -> None:
     )
     options_repr = repr(options)
     assert "emoji_policy='keep'" in options_repr
+    assert "non_ascii_policy='transliterate'" in options_repr
     assert "line_endings='lf'" in options_repr
     assert "unicode_normalization='nfkc'" in options_repr
 

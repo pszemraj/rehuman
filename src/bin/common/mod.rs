@@ -13,8 +13,8 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use rehuman::{
-    CleaningOptions, CleaningResult, CleaningStats, EmojiPolicy, LineEndingStyle, StreamCleaner,
-    TextCleaner, UnicodeNormalizationMode,
+    CleaningOptions, CleaningResult, CleaningStats, EmojiPolicy, LineEndingStyle, NonAsciiPolicy,
+    StreamCleaner, TextCleaner, UnicodeNormalizationMode,
 };
 
 /// Maximum input size accepted by non-streaming paths.
@@ -95,6 +95,35 @@ impl From<EmojiPolicy> for EmojiPolicyArg {
         match value {
             EmojiPolicy::Drop => EmojiPolicyArg::Drop,
             EmojiPolicy::Keep => EmojiPolicyArg::Keep,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+/// CLI/config representation of non-ASCII handling in keyboard-only mode.
+pub enum NonAsciiPolicyArg {
+    Drop,
+    Fold,
+    Transliterate,
+}
+
+impl From<NonAsciiPolicyArg> for NonAsciiPolicy {
+    fn from(value: NonAsciiPolicyArg) -> Self {
+        match value {
+            NonAsciiPolicyArg::Drop => NonAsciiPolicy::Drop,
+            NonAsciiPolicyArg::Fold => NonAsciiPolicy::Fold,
+            NonAsciiPolicyArg::Transliterate => NonAsciiPolicy::Transliterate,
+        }
+    }
+}
+
+impl From<NonAsciiPolicy> for NonAsciiPolicyArg {
+    fn from(value: NonAsciiPolicy) -> Self {
+        match value {
+            NonAsciiPolicy::Drop => NonAsciiPolicyArg::Drop,
+            NonAsciiPolicy::Fold => NonAsciiPolicyArg::Fold,
+            NonAsciiPolicy::Transliterate => NonAsciiPolicyArg::Transliterate,
         }
     }
 }
@@ -182,6 +211,7 @@ pub struct PartialOptions {
     pub normalize_other: Option<bool>,
     pub keyboard_only: Option<bool>,
     pub emoji_policy: Option<EmojiPolicyArg>,
+    pub non_ascii_policy: Option<NonAsciiPolicyArg>,
     pub remove_control_chars: Option<bool>,
     pub collapse_whitespace: Option<bool>,
     pub line_endings: Option<LineEndingChoice>,
@@ -217,6 +247,9 @@ impl PartialOptions {
         if let Some(policy) = self.emoji_policy {
             options.emoji_policy = policy.into();
         }
+        if let Some(policy) = self.non_ascii_policy {
+            options.non_ascii_policy = policy.into();
+        }
         if let Some(val) = self.remove_control_chars {
             options.remove_control_chars = val;
         }
@@ -249,6 +282,7 @@ pub struct SerializableOptions {
     pub normalize_other: bool,
     pub keyboard_only: bool,
     pub emoji_policy: EmojiPolicyArg,
+    pub non_ascii_policy: NonAsciiPolicyArg,
     pub remove_control_chars: bool,
     pub collapse_whitespace: bool,
     pub line_endings: LineEndingChoice,
@@ -278,6 +312,7 @@ impl SerializableOptions {
             .normalize_other(self.normalize_other)
             .keyboard_only(self.keyboard_only)
             .emoji_policy(self.emoji_policy.into())
+            .non_ascii_policy(self.non_ascii_policy.into())
             .remove_control_chars(self.remove_control_chars)
             .collapse_whitespace(self.collapse_whitespace)
             .normalize_line_endings(self.line_endings.into_option())
@@ -301,6 +336,7 @@ impl SerializableOptions {
             normalize_other: options.normalize_other,
             keyboard_only: options.keyboard_only,
             emoji_policy: options.emoji_policy.into(),
+            non_ascii_policy: options.non_ascii_policy.into(),
             remove_control_chars: options.remove_control_chars,
             collapse_whitespace: options.collapse_whitespace,
             line_endings: options.normalize_line_endings.into(),
@@ -337,6 +373,7 @@ pub fn default_cli_options() -> CleaningOptions {
     CleaningOptions::builder()
         .keyboard_only(true)
         .emoji_policy(EmojiPolicy::Drop)
+        .non_ascii_policy(NonAsciiPolicy::Transliterate)
         .build()
 }
 
@@ -394,6 +431,33 @@ pub fn validate_emoji_policy_dependency(
     if emoji_policy_specified_by_user && !options.keyboard_only {
         bail!(
             "'--keep-emoji'/'--emoji-policy' require keyboard-only mode; set '--keyboard-only true' or remove emoji policy flags"
+        );
+    }
+    Ok(())
+}
+
+/// Validate that explicit non-ASCII handling is meaningful.
+///
+/// Non-ASCII policy is only effective when keyboard-only mode is enabled.
+///
+/// # Arguments
+/// - `options`: Fully resolved options after config + CLI overrides.
+/// - `non_ascii_policy_specified_by_user`: Whether the user explicitly set
+///   non-ASCII handling on this invocation.
+///
+/// # Returns
+/// `Ok(())` when the combination is coherent.
+///
+/// # Errors
+/// Returns an error when non-ASCII policy was set explicitly while
+/// `keyboard_only` is disabled.
+pub fn validate_non_ascii_policy_dependency(
+    options: &CleaningOptions,
+    non_ascii_policy_specified_by_user: bool,
+) -> Result<()> {
+    if non_ascii_policy_specified_by_user && !options.keyboard_only {
+        bail!(
+            "'--non-ascii-policy' requires keyboard-only mode; set '--keyboard-only true' or remove the non-ASCII policy flag"
         );
     }
     Ok(())
@@ -507,6 +571,10 @@ pub fn write_stats(result: &CleaningResult<'_>) {
         stats.line_endings_normalized
     );
     eprintln!("  non_keyboard_removed: {}", stats.non_keyboard_removed);
+    eprintln!(
+        "  non_keyboard_transliterated: {}",
+        stats.non_keyboard_transliterated
+    );
     eprintln!("  emojis_dropped: {}", stats.emojis_dropped);
 }
 
@@ -653,7 +721,19 @@ normalise_spaces = false
         let err = validate_emoji_policy_dependency(&options, true)
             .expect_err("explicit emoji policy must require keyboard mode");
         assert!(
-            err.to_string().contains("require keyboard-only mode"),
+            err.to_string().contains("keyboard-only mode"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn non_ascii_policy_dependency_requires_keyboard_mode_when_explicit() {
+        let mut options = default_cli_options();
+        options.keyboard_only = false;
+        let err = validate_non_ascii_policy_dependency(&options, true)
+            .expect_err("explicit non-ASCII policy must require keyboard mode");
+        assert!(
+            err.to_string().contains("keyboard-only mode"),
             "unexpected error: {err}"
         );
     }

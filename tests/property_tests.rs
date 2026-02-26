@@ -129,14 +129,14 @@ fn keyboard_only_keeps_plain_ascii_symbols() {
 }
 
 #[test]
-fn keyboard_only_drops_keycap_sequences() {
+fn keyboard_only_reduces_keycap_sequences_to_ascii_digit() {
     let cleaner = TextCleaner::new(CleaningOptions {
         keyboard_only: true,
         ..CleaningOptions::default()
     });
     let output = cleaner.clean("7️⃣");
-    assert_eq!(output.text, "");
-    assert!(output.stats.emojis_dropped >= 1);
+    assert_eq!(output.text, "7");
+    assert!(output.stats.non_keyboard_removed >= 1);
 }
 
 #[test]

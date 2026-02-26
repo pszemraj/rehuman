@@ -4,7 +4,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use rehuman::{
-    CleaningOptions, CleaningStats, EmojiPolicy, LineEndingStyle, TextCleaner,
+    CleaningOptions, CleaningStats, EmojiPolicy, LineEndingStyle, NonAsciiPolicy, TextCleaner,
     UnicodeNormalizationMode,
 };
 
@@ -12,6 +12,14 @@ fn format_emoji_policy(policy: EmojiPolicy) -> &'static str {
     match policy {
         EmojiPolicy::Drop => "drop",
         EmojiPolicy::Keep => "keep",
+    }
+}
+
+fn format_non_ascii_policy(policy: NonAsciiPolicy) -> &'static str {
+    match policy {
+        NonAsciiPolicy::Drop => "drop",
+        NonAsciiPolicy::Fold => "fold",
+        NonAsciiPolicy::Transliterate => "transliterate",
     }
 }
 
@@ -47,6 +55,17 @@ fn parse_unicode_normalization(value: &str) -> PyResult<UnicodeNormalizationMode
     }
 }
 
+fn parse_non_ascii_policy(value: &str) -> PyResult<NonAsciiPolicy> {
+    match value.to_ascii_lowercase().as_str() {
+        "drop" => Ok(NonAsciiPolicy::Drop),
+        "fold" => Ok(NonAsciiPolicy::Fold),
+        "transliterate" => Ok(NonAsciiPolicy::Transliterate),
+        other => Err(PyValueError::new_err(format!(
+            "invalid non-ASCII policy: {other:?} (expected drop/fold/transliterate)"
+        ))),
+    }
+}
+
 fn parse_line_endings(value: Option<&str>) -> PyResult<Option<LineEndingStyle>> {
     match value.map(str::to_ascii_lowercase) {
         None => Ok(None),
@@ -76,6 +95,10 @@ fn stats_to_dict<'py>(py: Python<'py>, stats: &CleaningStats) -> PyResult<Bound<
     dict.set_item("control_chars_removed", stats.control_chars_removed)?;
     dict.set_item("line_endings_normalized", stats.line_endings_normalized)?;
     dict.set_item("non_keyboard_removed", stats.non_keyboard_removed)?;
+    dict.set_item(
+        "non_keyboard_transliterated",
+        stats.non_keyboard_transliterated,
+    )?;
     dict.set_item("emojis_dropped", stats.emojis_dropped)?;
     #[cfg(feature = "security")]
     dict.set_item("bidi_controls_removed", stats.bidi_controls_removed)?;
@@ -85,8 +108,9 @@ fn stats_to_dict<'py>(py: Python<'py>, stats: &CleaningStats) -> PyResult<Bound<
 #[pyfunction]
 /// Clean text with the default `rehuman` policy and return cleaned text only.
 ///
-/// Keyboard-only mode folds decomposable Unicode characters to ASCII where
-/// possible (`"Café"` -> `"Cafe"`), then drops remaining non-keyboard glyphs.
+/// Keyboard-only mode normalizes and transliterates non-ASCII text to ASCII
+/// where feasible (`"Café"` -> `"Cafe"`, `"Straße"` -> `"Strasse"`), then
+/// drops remaining non-keyboard glyphs.
 ///
 /// Use `Cleaner` when you need `changes_made` and per-operation stats.
 fn clean(text: &str) -> String {
@@ -173,6 +197,7 @@ impl Options {
         normalize_other = true,
         keyboard_only = true,
         keep_emoji = false,
+        non_ascii_policy = "transliterate",
         remove_control_chars = true,
         collapse_whitespace = false,
         line_endings = None,
@@ -189,6 +214,7 @@ impl Options {
         normalize_other: bool,
         keyboard_only: bool,
         keep_emoji: bool,
+        non_ascii_policy: &str,
         remove_control_chars: bool,
         collapse_whitespace: bool,
         line_endings: Option<&str>,
@@ -202,6 +228,7 @@ impl Options {
         };
         let normalize_line_endings = parse_line_endings(line_endings)?;
         let unicode_normalization = parse_unicode_normalization(unicode_normalization)?;
+        let non_ascii_policy = parse_non_ascii_policy(non_ascii_policy)?;
 
         let inner = CleaningOptions::builder()
             .remove_hidden(remove_hidden)
@@ -212,6 +239,7 @@ impl Options {
             .normalize_other(normalize_other)
             .keyboard_only(keyboard_only)
             .emoji_policy(emoji_policy)
+            .non_ascii_policy(non_ascii_policy)
             .remove_control_chars(remove_control_chars)
             .collapse_whitespace(collapse_whitespace)
             .normalize_line_endings(normalize_line_endings)
@@ -233,6 +261,7 @@ impl Options {
         normalize_other = true,
         keyboard_only = true,
         keep_emoji = false,
+        non_ascii_policy = "transliterate",
         remove_control_chars = true,
         collapse_whitespace = false,
         line_endings = None,
@@ -248,6 +277,7 @@ impl Options {
         normalize_other: bool,
         keyboard_only: bool,
         keep_emoji: bool,
+        non_ascii_policy: &str,
         remove_control_chars: bool,
         collapse_whitespace: bool,
         line_endings: Option<&str>,
@@ -260,6 +290,7 @@ impl Options {
         };
         let normalize_line_endings = parse_line_endings(line_endings)?;
         let unicode_normalization = parse_unicode_normalization(unicode_normalization)?;
+        let non_ascii_policy = parse_non_ascii_policy(non_ascii_policy)?;
 
         let inner = CleaningOptions::builder()
             .remove_hidden(remove_hidden)
@@ -270,6 +301,7 @@ impl Options {
             .normalize_other(normalize_other)
             .keyboard_only(keyboard_only)
             .emoji_policy(emoji_policy)
+            .non_ascii_policy(non_ascii_policy)
             .remove_control_chars(remove_control_chars)
             .collapse_whitespace(collapse_whitespace)
             .normalize_line_endings(normalize_line_endings)
@@ -350,7 +382,7 @@ impl Options {
                 "Options(",
                 "remove_hidden={}, remove_trailing_whitespace={}, normalize_spaces={}, ",
                 "normalize_dashes={}, normalize_quotes={}, normalize_other={}, ",
-                "keyboard_only={}, emoji_policy='{}', remove_control_chars={}, ",
+                "keyboard_only={}, emoji_policy='{}', non_ascii_policy='{}', remove_control_chars={}, ",
                 "collapse_whitespace={}, line_endings='{}', unicode_normalization='{}'",
                 "{})"
             ),
@@ -362,6 +394,7 @@ impl Options {
             o.normalize_other,
             o.keyboard_only,
             format_emoji_policy(o.emoji_policy),
+            format_non_ascii_policy(o.non_ascii_policy),
             o.remove_control_chars,
             o.collapse_whitespace,
             format_line_endings(o.normalize_line_endings),

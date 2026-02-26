@@ -44,7 +44,7 @@ rehuman --stream < huge.log > huge.clean.log
 ```
 
 > [!NOTE]
-> The CLI shares its defaults with the `rehuman::clean` helper: keyboard-only output with emoji dropped.
+> The CLI shares its defaults with the `rehuman::clean` helper: keyboard-only output with emoji dropped and non-ASCII transliterated when feasible.
 
 ### Output Options
 
@@ -53,6 +53,7 @@ rehuman --stream < huge.log > huge.clean.log
 | `--preset <name>`                | Apply named baseline options: `minimal`, `balanced`, `humanize`, `aggressive`, `code-safe` |
 | `--keyboard-only=<bool>`         | Restrict output to ASCII keyboard chars (default `true` for CLI) |
 | `--keep-emoji`                   | Keep emoji even when keyboard-only is active                     |
+| `--non-ascii-policy <mode>`      | `drop`, `fold`, or `transliterate` for non-ASCII handling in keyboard-only mode |
 | `--unicode-normalization <mode>` | One of `none`, `nfd`, `nfc`, `nfkd`, `nfkc`                      |
 | `--line-endings <style>`         | `lf`, `crlf`, `cr`, or `auto` (preserve input)                   |
 | `--stats`                        | Human-readable statistics to stderr                              |
@@ -125,6 +126,7 @@ version = 1
 [options]
 keyboard_only = true
 emoji_policy = "drop"
+non_ascii_policy = "transliterate"
 normalize_spaces = true
 normalize_quotes = true
 unicode_normalization = "nfkc"
@@ -139,6 +141,7 @@ unicode_normalization = "nfkc"
 ### Option Dependency Notes
 
 - `--keep-emoji` / `--emoji-policy` require keyboard-only mode (`--keyboard-only true`).
+- `--non-ascii-policy` requires keyboard-only mode (`--keyboard-only true`).
 - `--print-config` is a standalone mode and conflicts with processing/output flags.
 
 ### File Size Limit

@@ -29,7 +29,7 @@ let fancy = humanize("“Quote”—and…more");         // -> "\"Quote\"-and..
 
 - `clean` applies the default preset (hidden character removal, spacing fixes) and emits keyboard-safe ASCII (emoji are dropped unless you opt out).
 - `humanize` applies the "humanize" preset (default preset + typographic normalization + whitespace collapsing).
-- In keyboard-only mode, decomposable Unicode characters are folded to ASCII when possible. Example: `"Café"` becomes `"Cafe"`.
+- In keyboard-only mode, non-ASCII text is first normalized/folded and then transliterated when possible. Examples: `"Café"` becomes `"Cafe"`, `"Straße"` becomes `"Strasse"`.
 
 ## TextCleaner
 
@@ -37,7 +37,7 @@ Use `TextCleaner` when you need precise control.
 
 ```rust,no_run
 use rehuman::{
-    CleaningOptions, EmojiPolicy, TextCleaner, UnicodeNormalizationMode,
+    CleaningOptions, EmojiPolicy, NonAsciiPolicy, TextCleaner, UnicodeNormalizationMode,
 };
 
 let options = CleaningOptions::builder()
@@ -54,6 +54,7 @@ let options = CleaningOptions::builder()
     // Keyboard enforcement
     .keyboard_only(true) // true by default
     .emoji_policy(EmojiPolicy::Drop)
+    .non_ascii_policy(NonAsciiPolicy::Transliterate)
     .build();
 
 let cleaner = TextCleaner::new(options);
@@ -79,6 +80,7 @@ println!("dashes normalized: {}", result.stats.dashes_normalized);
 | `normalize_other`            | Misc fixes (ellipsis → `...`, fraction slash → `/`)               |
 | `keyboard_only`              | Keep ASCII keyboard characters (plus whitespace)                  |
 | `emoji_policy`               | Control emoji in `keyboard_only` mode (`Drop`/`Keep`)             |
+| `non_ascii_policy`           | Non-ASCII strategy in `keyboard_only` mode (`Drop`/`Fold`/`Transliterate`) |
 | `remove_control_chars`       | Drop control chars except `\n`, `\r`, `\t`                        |
 | `collapse_whitespace`        | Collapse consecutive spaces/tabs to a single space                |
 | `normalize_line_endings`     | Force LF/CRLF/CR output                                           |
@@ -93,6 +95,7 @@ Create tailored configurations with the fluent builder:
 let options = CleaningOptions::builder()
     .keyboard_only(true)
     .emoji_policy(EmojiPolicy::Keep)
+    .non_ascii_policy(NonAsciiPolicy::Transliterate)
     .remove_hidden(false)
     .normalize_line_endings(None)
     .build();
@@ -126,6 +129,7 @@ pub struct CleaningStats {
     pub control_chars_removed: u64,
     pub line_endings_normalized: u64,
     pub non_keyboard_removed: u64,
+    pub non_keyboard_transliterated: u64,
     pub emojis_dropped: u64,
 }
 ```

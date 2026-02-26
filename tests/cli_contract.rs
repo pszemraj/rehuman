@@ -151,7 +151,7 @@ fn rehuman_rejects_explicit_emoji_policy_without_keyboard_mode() {
     );
     assert!(!output.status.success());
     assert!(
-        stderr_text(&output).contains("require keyboard-only mode"),
+        stderr_text(&output).contains("keyboard-only mode"),
         "{}",
         stderr_text(&output)
     );
@@ -166,7 +166,27 @@ fn ishuman_rejects_explicit_emoji_policy_without_keyboard_mode() {
     );
     assert!(!output.status.success());
     assert!(
-        stderr_text(&output).contains("require keyboard-only mode"),
+        stderr_text(&output).contains("keyboard-only mode"),
+        "{}",
+        stderr_text(&output)
+    );
+}
+
+#[test]
+fn rehuman_rejects_explicit_non_ascii_policy_without_keyboard_mode() {
+    let output = run_bin(
+        "rehuman",
+        &[
+            "--keyboard-only",
+            "false",
+            "--non-ascii-policy",
+            "transliterate",
+        ],
+        Some("x"),
+    );
+    assert!(!output.status.success());
+    assert!(
+        stderr_text(&output).contains("keyboard-only mode"),
         "{}",
         stderr_text(&output)
     );
@@ -227,6 +247,13 @@ fn default_keyboard_mode_folds_latin_diacritics() {
     let out = run_bin("rehuman", &[], Some("Caf\u{00E9} d\u{00E9}j\u{00E0}\n"));
     assert!(out.status.success(), "{}", stderr_text(&out));
     assert_eq!(stdout_text(&out), "Cafe deja\n");
+}
+
+#[test]
+fn default_keyboard_mode_transliterates_non_decomposing_latin() {
+    let out = run_bin("rehuman", &[], Some("Stra\u{00DF}e \u{00BD}\n"));
+    assert!(out.status.success(), "{}", stderr_text(&out));
+    assert_eq!(stdout_text(&out), "Strasse 1/2\n");
 }
 
 #[test]

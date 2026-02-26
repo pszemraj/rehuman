@@ -42,6 +42,7 @@ class Options:
         normalize_other: bool = ...,
         keyboard_only: bool = ...,
         keep_emoji: bool = ...,
+        non_ascii_policy: str = ...,
         remove_control_chars: bool = ...,
         collapse_whitespace: bool = ...,
         line_endings: str | None = ...,
