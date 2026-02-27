@@ -320,6 +320,7 @@ struct Cli {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
 
     #[test]
     fn clap_rejects_stream_and_inplace_together() {
@@ -331,5 +332,47 @@ mod tests {
     fn clap_rejects_print_config_with_processing_flags() {
         let parsed = Cli::try_parse_from(["rehuman", "--print-config", "--stats"]);
         assert!(parsed.is_err(), "expected clap conflict error");
+    }
+
+    #[test]
+    fn write_stats_json_emits_trailing_newline() {
+        let stats = CleaningStats::default();
+        let summary = StatsSummary {
+            changed: false,
+            changes_made: 0,
+            stats: &stats,
+        };
+        let mut out = Vec::<u8>::new();
+        write_stats_json(&mut out, &summary).expect("JSON stats should serialize");
+        assert_eq!(out.last(), Some(&b'\n'));
+    }
+
+    struct FlushErrorWriter;
+
+    impl Write for FlushErrorWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "flush failed"))
+        }
+    }
+
+    #[test]
+    fn write_stats_json_propagates_flush_errors() {
+        let stats = CleaningStats::default();
+        let summary = StatsSummary {
+            changed: true,
+            changes_made: 1,
+            stats: &stats,
+        };
+        let mut out = FlushErrorWriter;
+        let err = write_stats_json(&mut out, &summary).expect_err("flush errors should surface");
+        assert!(
+            err.to_string()
+                .contains("failed to flush JSON stats output"),
+            "unexpected error: {err}"
+        );
     }
 }
