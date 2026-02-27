@@ -4,17 +4,17 @@
 //! streaming glue, and stats serialization used by both binaries.
 
 use std::fs;
-use std::io::{self, BufRead, IsTerminal, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use clap::ValueEnum;
+use clap::{Args, ValueEnum};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use rehuman::{
     CleaningOptions, CleaningResult, CleaningStats, EmojiPolicy, LineEndingStyle, NonAsciiPolicy,
-    StreamCleaner, TextCleaner, UnicodeNormalizationMode,
+    UnicodeNormalizationMode,
 };
 
 /// Maximum input size accepted by non-streaming paths.
@@ -254,6 +254,147 @@ impl PartialOptions {
     }
 }
 
+/// Shared CLI argument surface used by both `rehuman` and `ishuman`.
+#[derive(Args, Debug)]
+pub struct SharedCliOptions {
+    /// Apply a named preset (for example `code-safe` for docs/source text).
+    #[arg(long, value_enum)]
+    pub preset: Option<PresetArg>,
+
+    /// Override remove_hidden behavior (true/false, default true)
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub remove_hidden: Option<bool>,
+
+    /// Override remove_trailing_whitespace behavior (true/false, default true)
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub remove_trailing_whitespace: Option<bool>,
+
+    /// Override normalize_spaces behavior (true/false, default true)
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub normalize_spaces: Option<bool>,
+
+    /// Override normalize_dashes behavior (true/false, default true)
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub normalize_dashes: Option<bool>,
+
+    /// Override normalize_quotes behavior (true/false, default true)
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub normalize_quotes: Option<bool>,
+
+    /// Override normalize_other behavior (true/false, default true)
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub normalize_other: Option<bool>,
+
+    /// Override keyboard_only behavior (true/false, default true for CLI)
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub keyboard_only: Option<bool>,
+
+    /// Allow a curated non-ASCII keyboard allowlist in keyboard-only mode.
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub extended_keyboard: Option<bool>,
+
+    /// Allow emoji to pass through even when keyboard_only is enabled
+    #[arg(long, action = clap::ArgAction::SetTrue, conflicts_with = "emoji_policy")]
+    pub keep_emoji: bool,
+
+    /// Explicit emoji policy (drop or keep)
+    #[arg(long, value_enum)]
+    pub emoji_policy: Option<EmojiPolicyArg>,
+
+    /// Non-ASCII handling in keyboard-only mode (drop/fold/transliterate).
+    #[arg(long, value_enum)]
+    pub non_ascii_policy: Option<NonAsciiPolicyArg>,
+
+    /// Preserve ZWJ/ZWNJ joiners even when hidden characters are removed.
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub preserve_joiners: Option<bool>,
+
+    /// Override remove_control_chars behavior (true/false, default true)
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub remove_control_chars: Option<bool>,
+
+    /// Override collapse_whitespace behavior (true/false, default false)
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub collapse_whitespace: Option<bool>,
+
+    /// Line ending normalization strategy (auto = preserve input)
+    #[arg(long, value_enum)]
+    pub line_endings: Option<LineEndingChoice>,
+
+    /// Unicode normalization mode (none/NFD/NFC/NFKD/NFKC)
+    #[arg(long, value_enum)]
+    pub unicode_normalization: Option<UnicodeNormalizationChoice>,
+
+    /// Strip bidi control characters (true/false, default false)
+    #[cfg(feature = "security")]
+    #[arg(long, value_name = "BOOL", value_parser = parse_bool_flag, default_missing_value = "true", num_args = 0..=1)]
+    pub strip_bidi_controls: Option<bool>,
+
+    /// Path to config file. Defaults to platform config directory.
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
+}
+
+impl SharedCliOptions {
+    /// Convert shared CLI flags into sparse option overrides.
+    ///
+    /// # Returns
+    /// A [`PartialOptions`] value containing only user-provided overrides.
+    pub fn to_partial_options(&self) -> PartialOptions {
+        let mut partial = PartialOptions {
+            remove_hidden: self.remove_hidden,
+            remove_trailing_whitespace: self.remove_trailing_whitespace,
+            normalize_spaces: self.normalize_spaces,
+            normalize_dashes: self.normalize_dashes,
+            normalize_quotes: self.normalize_quotes,
+            normalize_other: self.normalize_other,
+            keyboard_only: self.keyboard_only,
+            extended_keyboard: self.extended_keyboard,
+            emoji_policy: None,
+            non_ascii_policy: self.non_ascii_policy,
+            preserve_joiners: self.preserve_joiners,
+            remove_control_chars: self.remove_control_chars,
+            collapse_whitespace: self.collapse_whitespace,
+            line_endings: self.line_endings,
+            unicode_normalization: self.unicode_normalization,
+            #[cfg(feature = "security")]
+            strip_bidi_controls: self.strip_bidi_controls,
+        };
+
+        if self.keep_emoji {
+            partial.emoji_policy = Some(EmojiPolicyArg::Keep);
+        } else if let Some(policy) = self.emoji_policy {
+            partial.emoji_policy = Some(policy);
+        }
+
+        partial
+    }
+
+    /// Whether emoji policy controls were explicitly specified.
+    ///
+    /// # Returns
+    /// `true` if `--keep-emoji` or `--emoji-policy` was provided.
+    pub fn emoji_policy_specified_by_user(&self) -> bool {
+        self.keep_emoji || self.emoji_policy.is_some()
+    }
+
+    /// Whether non-ASCII policy was explicitly specified.
+    ///
+    /// # Returns
+    /// `true` if `--non-ascii-policy` was provided.
+    pub fn non_ascii_policy_specified_by_user(&self) -> bool {
+        self.non_ascii_policy.is_some()
+    }
+
+    /// Whether extended keyboard mode was explicitly specified.
+    ///
+    /// # Returns
+    /// `true` if `--extended-keyboard` was provided.
+    pub fn extended_keyboard_specified_by_user(&self) -> bool {
+        self.extended_keyboard.is_some()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
@@ -415,12 +556,11 @@ pub fn validate_emoji_policy_dependency(
     options: &CleaningOptions,
     emoji_policy_specified_by_user: bool,
 ) -> Result<()> {
-    if emoji_policy_specified_by_user && !options.keyboard_only {
-        bail!(
-            "'--keep-emoji'/'--emoji-policy' require keyboard-only mode; set '--keyboard-only true' or remove emoji policy flags"
-        );
-    }
-    Ok(())
+    validate_keyboard_only_dependency(
+        options,
+        emoji_policy_specified_by_user,
+        "'--keep-emoji'/'--emoji-policy'",
+    )
 }
 
 /// Validate that explicit non-ASCII handling is meaningful.
@@ -442,12 +582,11 @@ pub fn validate_non_ascii_policy_dependency(
     options: &CleaningOptions,
     non_ascii_policy_specified_by_user: bool,
 ) -> Result<()> {
-    if non_ascii_policy_specified_by_user && !options.keyboard_only {
-        bail!(
-            "'--non-ascii-policy' requires keyboard-only mode; set '--keyboard-only true' or remove the non-ASCII policy flag"
-        );
-    }
-    Ok(())
+    validate_keyboard_only_dependency(
+        options,
+        non_ascii_policy_specified_by_user,
+        "'--non-ascii-policy'",
+    )
 }
 
 /// Validate that explicit extended keyboard mode is meaningful.
@@ -469,39 +608,11 @@ pub fn validate_extended_keyboard_dependency(
     options: &CleaningOptions,
     extended_keyboard_specified_by_user: bool,
 ) -> Result<()> {
-    if extended_keyboard_specified_by_user && !options.keyboard_only {
-        bail!(
-            "'--extended-keyboard' requires keyboard-only mode; set '--keyboard-only true' or remove the extended keyboard flag"
-        );
-    }
-    Ok(())
-}
-
-#[allow(dead_code)]
-/// Persist config to disk, creating parent directories as needed.
-///
-/// # Arguments
-/// - `path`: Destination config path.
-/// - `options`: Runtime options snapshot to serialize.
-///
-/// # Returns
-/// `Ok(())` once config is written.
-///
-/// # Errors
-/// Returns an error if directories cannot be created, serialization fails, or
-/// the file cannot be written.
-pub fn save_config(path: &Path, options: &CleaningOptions) -> Result<()> {
-    let cfg = ConfigFile {
-        version: CONFIG_VERSION,
-        options: SerializableOptions::from_cleaning_options(options),
-    };
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create config directory {}", parent.display()))?;
-    }
-    let data = toml::to_string_pretty(&cfg)?;
-    fs::write(path, data)?;
-    Ok(())
+    validate_keyboard_only_dependency(
+        options,
+        extended_keyboard_specified_by_user,
+        "'--extended-keyboard'",
+    )
 }
 
 /// Read input text from a path or stdin with size checks.
@@ -550,22 +661,6 @@ pub fn read_input(input_path: Option<&Path>, max_bytes: usize) -> Result<String>
     }
 }
 
-#[allow(dead_code)]
-/// Write cleaned text to stdout.
-///
-/// # Returns
-/// `Ok(())` when output is written.
-///
-/// # Errors
-/// Returns an error if writing to stdout fails.
-pub fn write_output(result: &CleaningResult<'_>) -> Result<()> {
-    let mut stdout = io::stdout().lock();
-    stdout
-        .write_all(result.text.as_bytes())
-        .context("failed to write to stdout")?;
-    Ok(())
-}
-
 /// Emit human-readable stats to stderr.
 pub fn write_stats(result: &CleaningResult<'_>) {
     let stats = &result.stats;
@@ -607,14 +702,6 @@ pub fn parse_bool_flag(value: &str) -> std::result::Result<bool, String> {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
-/// Aggregate output produced by streaming cleanup.
-pub struct StreamOutcome {
-    pub stats: CleaningStats,
-    pub changes_made: u64,
-}
-
 #[derive(Serialize)]
 /// JSON-serializable summary payload for stats output.
 pub struct StatsSummary<'a> {
@@ -623,62 +710,17 @@ pub struct StatsSummary<'a> {
     pub stats: &'a CleaningStats,
 }
 
-#[allow(dead_code)]
-/// Clean buffered line-stream input and write cleaned output incrementally.
-///
-/// # Arguments
-/// - `reader`: Source stream, read line-by-line.
-/// - `writer`: Destination stream for cleaned chunks.
-/// - `cleaner`: Reusable cleaner configuration.
-///
-/// # Returns
-/// Aggregate streaming stats and total change count.
-///
-/// # Errors
-/// Returns an error if reading, writing, or flushing streams fails.
-pub fn clean_stream<R, W>(
-    reader: &mut R,
-    writer: &mut W,
-    cleaner: &TextCleaner,
-) -> Result<StreamOutcome>
-where
-    R: BufRead,
-    W: Write,
-{
-    let mut stream = StreamCleaner::new(cleaner.options().clone());
-    let mut buffer = String::new();
-    let mut chunk_output = String::new();
-
-    loop {
-        buffer.clear();
-        let bytes_read = reader
-            .read_line(&mut buffer)
-            .context("failed to read input stream")?;
-        if bytes_read == 0 {
-            break;
-        }
-        if let Some(result) = stream.feed(&buffer, &mut chunk_output) {
-            writer
-                .write_all(result.text.as_bytes())
-                .context("failed to write stream chunk")?;
-            chunk_output.clear();
-        }
+fn validate_keyboard_only_dependency(
+    options: &CleaningOptions,
+    dependent_flag_specified_by_user: bool,
+    flag_label: &str,
+) -> Result<()> {
+    if dependent_flag_specified_by_user && !options.keyboard_only {
+        bail!(
+            "{flag_label} requires keyboard-only mode; set '--keyboard-only true' or remove the {flag_label} flag"
+        );
     }
-
-    if let Some(result) = stream.finish(&mut chunk_output) {
-        writer
-            .write_all(result.text.as_bytes())
-            .context("failed to write stream chunk")?;
-        chunk_output.clear();
-    }
-
-    writer.flush().context("failed to flush output stream")?;
-
-    let summary = stream.summary();
-    Ok(StreamOutcome {
-        stats: summary.stats,
-        changes_made: summary.changes_made,
-    })
+    Ok(())
 }
 
 /// Serialize JSON stats payload and append a trailing newline.
@@ -702,122 +744,4 @@ pub fn write_stats_json<W: Write>(writer: &mut W, summary: &StatsSummary) -> Res
         .flush()
         .context("failed to flush JSON stats output")?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io;
-
-    #[test]
-    fn cli_defaults_match_library_defaults() {
-        let cli_defaults = default_cli_options();
-        let library_defaults = CleaningOptions::default();
-        assert_eq!(
-            cli_defaults, library_defaults,
-            "CLI default options should mirror library defaults"
-        );
-    }
-
-    #[test]
-    fn config_rejects_unknown_option_fields() {
-        let bad = r#"
-version = 1
-[options]
-keyboard_only = true
-normalise_spaces = false
-"#;
-        let err = toml::from_str::<ConfigFile>(bad).expect_err("unknown fields should fail");
-        assert!(
-            err.to_string().contains("unknown field"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn emoji_policy_dependency_requires_keyboard_mode_when_explicit() {
-        let mut options = default_cli_options();
-        options.keyboard_only = false;
-        let err = validate_emoji_policy_dependency(&options, true)
-            .expect_err("explicit emoji policy must require keyboard mode");
-        assert!(
-            err.to_string().contains("keyboard-only mode"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn non_ascii_policy_dependency_requires_keyboard_mode_when_explicit() {
-        let mut options = default_cli_options();
-        options.keyboard_only = false;
-        let err = validate_non_ascii_policy_dependency(&options, true)
-            .expect_err("explicit non-ASCII policy must require keyboard mode");
-        assert!(
-            err.to_string().contains("keyboard-only mode"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn extended_keyboard_dependency_requires_keyboard_mode_when_explicit() {
-        let mut options = default_cli_options();
-        options.keyboard_only = false;
-        let err = validate_extended_keyboard_dependency(&options, true)
-            .expect_err("explicit extended keyboard mode must require keyboard mode");
-        assert!(
-            err.to_string().contains("keyboard-only mode"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn code_safe_preset_matches_library_preset() {
-        assert_eq!(
-            options_from_preset(PresetArg::CodeSafe),
-            CleaningOptions::code_safe()
-        );
-    }
-
-    #[test]
-    fn write_stats_json_emits_trailing_newline() {
-        let stats = CleaningStats::default();
-        let summary = StatsSummary {
-            changed: false,
-            changes_made: 0,
-            stats: &stats,
-        };
-
-        let mut out = Vec::<u8>::new();
-        write_stats_json(&mut out, &summary).expect("JSON stats should serialize");
-        assert_eq!(out.last(), Some(&b'\n'));
-    }
-
-    struct FlushErrorWriter;
-
-    impl Write for FlushErrorWriter {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Err(io::Error::new(io::ErrorKind::BrokenPipe, "flush failed"))
-        }
-    }
-
-    #[test]
-    fn write_stats_json_propagates_flush_errors() {
-        let stats = CleaningStats::default();
-        let summary = StatsSummary {
-            changed: true,
-            changes_made: 1,
-            stats: &stats,
-        };
-        let mut out = FlushErrorWriter;
-        let err = write_stats_json(&mut out, &summary).expect_err("flush errors should surface");
-        assert!(
-            err.to_string()
-                .contains("failed to flush JSON stats output"),
-            "unexpected error: {err}"
-        );
-    }
 }

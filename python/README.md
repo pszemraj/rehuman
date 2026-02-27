@@ -18,19 +18,20 @@ See [python/docs/index.md](docs/index.md) for the Python docs map.
 
 ## Quickstart
 
-`clean()` and `humanize()` both return `str`, but they use different defaults:
+`clean()` and `humanize()` both return `str`, but they target different outputs:
 
-| Helper | Default behavior |
-| --- | --- |
-| `clean(text)` | Keyboard-safe output (`keyboard_only=True`), transliterates non-ASCII when feasible |
-| `humanize(text)` | Human-readable Unicode output (`keyboard_only=False`), collapses whitespace |
+- `clean(text)`: ASCII/keyboard-safe text (drops emoji by default, transliterates when feasible)
+- `humanize(text)`: human-readable Unicode text (keeps Unicode, collapses repeated whitespace)
 
 ```python
 import rehuman
 
 text = "A   B 👍 Café"
-assert rehuman.clean(text) == "A   B Cafe"
-assert rehuman.humanize(text) == "A B 👍 Café"
+cleaned = rehuman.clean(text)       # "A   B Cafe"
+humanized = rehuman.humanize(text)  # "A B 👍 Café"
+
+assert cleaned == "A   B Cafe"
+assert humanized == "A B 👍 Café"
 
 # Use Cleaner for change counts and stats
 cleaner = rehuman.Cleaner()
@@ -40,8 +41,10 @@ print(result.changes_made) # e.g. 3
 print(result.stats)        # dict with per-operation counters
 ```
 
-For custom options (`non_ascii_policy`, `extended_keyboard`, `preserve_joiners`,
-presets), see [python/docs/api.md](docs/api.md#options).
+For exact behavior differences and presets, see:
+
+- [clean vs humanize](docs/api.md#clean-vs-humanize)
+- [Options](docs/api.md#options)
 
 ## Tests
 
