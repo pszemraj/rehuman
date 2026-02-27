@@ -41,14 +41,14 @@ When `keyboard_only=true`, the cleaner applies this order:
    - `Drop`: remove non-ASCII characters.
    - `Fold`: keep compatibility/decomposition-to-ASCII forms.
    - `Transliterate`: fold first, then transliterate remaining non-ASCII where feasible.
-3. If `extended_keyboard=true`, keep curated non-ASCII keyboard symbols (for example `€`, `£`, `§`, `…`) without transliterating.
+3. If `extended_keyboard=true`, keep curated non-ASCII keyboard symbols (for example `U+20AC`, `U+00A3`, `U+00A7`, `U+2026`) without transliterating.
 4. Remove hidden joiners (ZWJ/ZWNJ) unless `preserve_joiners=true`.
 
 Examples:
 
-- `"Café"` -> `"Cafe"`
-- `"Straße"` -> `"Strasse"` (with `Transliterate`)
-- `"½"` -> `"1/2"` (with `Fold` or `Transliterate`)
+- `"\u{00E9}"` in `"Caf\u{00E9}"` can map to `"Cafe"`
+- `"\u{00DF}"` in `"Stra\u{00DF}e"` can map to `"Strasse"` (with `Transliterate`)
+- `"\u{00BD}"` can map to `"1/2"` (with `Fold` or `Transliterate`)
 
 ## TextCleaner
 
@@ -96,7 +96,7 @@ println!("dashes normalized: {}", result.stats.dashes_normalized);
 | `normalize_spaces`           | Map Unicode space separators to ASCII space                       |
 | `normalize_dashes`           | Map dashes (em/en/minus) to ASCII hyphen                          |
 | `normalize_quotes`           | Map quotation marks to ASCII quotes                               |
-| `normalize_other`            | Misc fixes (ellipsis → `...`, fraction slash → `/`)               |
+| `normalize_other`            | Misc fixes (ellipsis -> `...`, fraction slash -> `/`)               |
 | `keyboard_only`              | Keep ASCII keyboard characters (plus whitespace)                  |
 | `extended_keyboard`          | Allow curated non-ASCII keyboard symbols in keyboard-only mode     |
 | `emoji_policy`               | Control emoji in `keyboard_only` mode (`Drop`/`Keep`)             |
@@ -124,7 +124,7 @@ let options = CleaningOptions::builder()
     .build();
 ```
 
-The presets (`minimal`, `balanced`, `humanize`, `aggressive`) now spell out every field explicitly, so they serve as documented baselines that you can tweak via the builder.
+The presets (`minimal`, `balanced`, `humanize`, `aggressive`, `code_safe`) now spell out every field explicitly, so they serve as documented baselines that you can tweak via the builder.
 When the optional `security` feature is enabled, you can opt into bidi-control stripping via `.strip_bidi_controls(true)` on the builder.
 
 ### Cleaning Statistics

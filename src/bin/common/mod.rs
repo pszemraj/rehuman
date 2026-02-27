@@ -46,34 +46,8 @@ pub fn options_from_preset(preset: PresetArg) -> CleaningOptions {
         PresetArg::Balanced => CleaningOptions::balanced(),
         PresetArg::Humanize => CleaningOptions::humanize(),
         PresetArg::Aggressive => CleaningOptions::aggressive(),
-        PresetArg::CodeSafe => code_safe_options(),
+        PresetArg::CodeSafe => CleaningOptions::code_safe(),
     }
-}
-
-/// Build the code-safe preset used for docs/source-style content.
-///
-/// # Returns
-/// A preset that keeps non-ASCII glyphs and avoids semantic rewrites.
-pub fn code_safe_options() -> CleaningOptions {
-    let builder = CleaningOptions::builder()
-        .remove_hidden(true)
-        .remove_trailing_whitespace(true)
-        .normalize_spaces(true)
-        .normalize_dashes(false)
-        .normalize_quotes(false)
-        .normalize_other(false)
-        .keyboard_only(false)
-        .extended_keyboard(false)
-        .emoji_policy(EmojiPolicy::Keep)
-        .non_ascii_policy(NonAsciiPolicy::Transliterate)
-        .preserve_joiners(true)
-        .remove_control_chars(true)
-        .collapse_whitespace(false)
-        .normalize_line_endings(None)
-        .unicode_normalization(UnicodeNormalizationMode::None);
-    #[cfg(feature = "security")]
-    let builder = builder.strip_bidi_controls(false);
-    builder.build()
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, Serialize, Deserialize)]
@@ -387,13 +361,7 @@ impl Default for ConfigFile {
 /// # Returns
 /// The baseline CLI configuration.
 pub fn default_cli_options() -> CleaningOptions {
-    CleaningOptions::builder()
-        .keyboard_only(true)
-        .extended_keyboard(false)
-        .emoji_policy(EmojiPolicy::Drop)
-        .non_ascii_policy(NonAsciiPolicy::Transliterate)
-        .preserve_joiners(false)
-        .build()
+    CleaningOptions::default()
 }
 
 /// Resolve the platform-specific default config path.
@@ -727,13 +695,19 @@ where
 pub fn write_stats_json<W: Write>(writer: &mut W, summary: &StatsSummary) -> Result<()> {
     serde_json::to_writer_pretty(&mut *writer, summary)
         .context("failed to serialize JSON stats")?;
-    writer.write_all(b"\n").ok();
+    writer
+        .write_all(b"\n")
+        .context("failed to write JSON stats newline")?;
+    writer
+        .flush()
+        .context("failed to flush JSON stats output")?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
 
     #[test]
     fn cli_defaults_match_library_defaults() {
@@ -792,6 +766,57 @@ normalise_spaces = false
             .expect_err("explicit extended keyboard mode must require keyboard mode");
         assert!(
             err.to_string().contains("keyboard-only mode"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn code_safe_preset_matches_library_preset() {
+        assert_eq!(
+            options_from_preset(PresetArg::CodeSafe),
+            CleaningOptions::code_safe()
+        );
+    }
+
+    #[test]
+    fn write_stats_json_emits_trailing_newline() {
+        let stats = CleaningStats::default();
+        let summary = StatsSummary {
+            changed: false,
+            changes_made: 0,
+            stats: &stats,
+        };
+
+        let mut out = Vec::<u8>::new();
+        write_stats_json(&mut out, &summary).expect("JSON stats should serialize");
+        assert_eq!(out.last(), Some(&b'\n'));
+    }
+
+    struct FlushErrorWriter;
+
+    impl Write for FlushErrorWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "flush failed"))
+        }
+    }
+
+    #[test]
+    fn write_stats_json_propagates_flush_errors() {
+        let stats = CleaningStats::default();
+        let summary = StatsSummary {
+            changed: true,
+            changes_made: 1,
+            stats: &stats,
+        };
+        let mut out = FlushErrorWriter;
+        let err = write_stats_json(&mut out, &summary).expect_err("flush errors should surface");
+        assert!(
+            err.to_string()
+                .contains("failed to flush JSON stats output"),
             "unexpected error: {err}"
         );
     }
