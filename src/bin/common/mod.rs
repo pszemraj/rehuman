@@ -337,6 +337,9 @@ pub struct SharedCliOptions {
 
 impl SharedCliOptions {
     /// Convert shared CLI flags into sparse option overrides.
+    ///
+    /// # Returns
+    /// A [`PartialOptions`] value containing only user-provided overrides.
     pub fn to_partial_options(&self) -> PartialOptions {
         let mut partial = PartialOptions {
             remove_hidden: self.remove_hidden,
@@ -368,16 +371,25 @@ impl SharedCliOptions {
     }
 
     /// Whether emoji policy controls were explicitly specified.
+    ///
+    /// # Returns
+    /// `true` if `--keep-emoji` or `--emoji-policy` was provided.
     pub fn emoji_policy_specified_by_user(&self) -> bool {
         self.keep_emoji || self.emoji_policy.is_some()
     }
 
     /// Whether non-ASCII policy was explicitly specified.
+    ///
+    /// # Returns
+    /// `true` if `--non-ascii-policy` was provided.
     pub fn non_ascii_policy_specified_by_user(&self) -> bool {
         self.non_ascii_policy.is_some()
     }
 
     /// Whether extended keyboard mode was explicitly specified.
+    ///
+    /// # Returns
+    /// `true` if `--extended-keyboard` was provided.
     pub fn extended_keyboard_specified_by_user(&self) -> bool {
         self.extended_keyboard.is_some()
     }
