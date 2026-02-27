@@ -5,8 +5,7 @@ practical CLI flows and printing reviewable terminal output.
 
 ## Run
 
-From repo root, run this command block directly (or put your own local wrapper
-under `local-scratch/`):
+From repo root, run this command block directly:
 
 ```bash
 set -euo pipefail
@@ -39,10 +38,25 @@ target/debug/rehuman "${SMOKE_DIR}/prose.txt" > "${SMOKE_DIR}/prose.default.out"
 target/debug/rehuman --preset code-safe "${SMOKE_DIR}/prose.txt" > "${SMOKE_DIR}/prose.code_safe.out"
 target/debug/rehuman --preset humanize "${SMOKE_DIR}/prose.txt" > "${SMOKE_DIR}/prose.humanize.out"
 
-target/debug/ishuman "${SMOKE_DIR}/diagram.md" >/dev/null 2>&1; DEFAULT_EXIT=$?
-target/debug/ishuman --preset code-safe "${SMOKE_DIR}/diagram.md" >/dev/null 2>&1; CODE_SAFE_EXIT=$?
+if target/debug/ishuman "${SMOKE_DIR}/diagram.md" >/dev/null 2>&1; then
+  DEFAULT_EXIT=0
+else
+  DEFAULT_EXIT=$?
+fi
+
+if target/debug/ishuman --preset code-safe "${SMOKE_DIR}/diagram.md" >/dev/null 2>&1; then
+  CODE_SAFE_EXIT=0
+else
+  CODE_SAFE_EXIT=$?
+fi
+
 echo "ishuman default exit code: ${DEFAULT_EXIT} (expected 1)"
 echo "ishuman --preset code-safe exit code: ${CODE_SAFE_EXIT} (expected 0)"
+
+if [[ "${DEFAULT_EXIT}" -ne 1 || "${CODE_SAFE_EXIT}" -ne 0 ]]; then
+  echo "Unexpected ishuman exit-code behavior."
+  exit 1
+fi
 ```
 
 Artifacts are written to:
