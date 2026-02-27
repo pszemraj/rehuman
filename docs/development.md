@@ -19,10 +19,7 @@
   [Nordth](https://github.com/Nordth).
 - Unicode-derived tables are generated at build time; no network traffic occurs at runtime.
 
-## Documentation Map
+## Documentation
 
-- Rust library semantics: [API Reference](api.md)
-- CLI behavior and flags: [CLI Guide](cli.md)
-- Rust usage recipes: [Examples](examples.md)
-- Python package docs: [python/docs/index.md](../python/docs/index.md)
-- Python release automation + PyPI flow: [python/docs/release.md](../python/docs/release.md)
+- Rust docs index: [README](../README.md#documentation)
+- Python docs index: [python/docs/index.md](../python/docs/index.md)
