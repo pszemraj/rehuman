@@ -26,5 +26,3 @@
 - Rust usage recipes: [Examples](examples.md)
 - Python package docs: [python/docs/index.md](../python/docs/index.md)
 - Python release automation + PyPI flow: [python/docs/release.md](../python/docs/release.md)
-- Manual CLI smoke-test workflow: [docs/dev/smoke-tests.md](dev/smoke-tests.md)
-- Rust file-size exceptions: [docs/dev/loc-exceptions.toml](dev/loc-exceptions.toml)
