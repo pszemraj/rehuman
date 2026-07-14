@@ -5,10 +5,16 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static BIN_BUILD_ONCE: OnceLock<()> = OnceLock::new();
+
+// Disambiguates temp dirs created by concurrent test threads: the pid is shared
+// and the clock can tick coarser than a nanosecond, so a timestamp alone can
+// collide and one test's cleanup then deletes another test's files mid-run.
+static TMP_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn target_dir() -> PathBuf {
     if let Ok(dir) = env::var("CARGO_TARGET_DIR") {
@@ -92,8 +98,9 @@ fn make_tmp_dir() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock before unix epoch")
         .as_nanos();
+    let seq = TMP_DIR_SEQ.fetch_add(1, Ordering::Relaxed);
     let mut dir = base;
-    dir.push(format!("cli-contract-{}-{stamp}", std::process::id()));
+    dir.push(format!("cli-contract-{}-{stamp}-{seq}", std::process::id()));
     fs::create_dir_all(&dir).expect("failed to create test temp directory");
     dir
 }
@@ -373,9 +380,27 @@ fn default_keyboard_mode_folds_latin_diacritics() {
 
 #[test]
 fn default_keyboard_mode_transliterates_non_decomposing_latin() {
-    let out = run_bin("rehuman", &[], Some("Stra\u{00DF}e \u{00BD}\n"));
+    let out = run_bin("rehuman", &[], Some("Stra\u{00DF}e\n"));
     assert!(out.status.success(), "{}", stderr_text(&out));
-    assert_eq!(stdout_text(&out), "Strasse 1/2\n");
+    assert_eq!(stdout_text(&out), "Strasse\n");
+
+    // ½ -> "1/2" comes from NFKD; the binary is built with the same feature
+    // set as this test, so it only folds fractions when `unorm` is enabled.
+    #[cfg(feature = "unorm")]
+    {
+        let out = run_bin("rehuman", &[], Some("Stra\u{00DF}e \u{00BD}\n"));
+        assert!(out.status.success(), "{}", stderr_text(&out));
+        assert_eq!(stdout_text(&out), "Strasse 1/2\n");
+    }
+}
+
+#[test]
+fn default_keyboard_mode_transliterates_symbols() {
+    // Curated symbol layer: negation preserved, arrows and bullets mapped.
+    // None of these rely on NFKD, so this holds across feature combinations.
+    let out = run_bin("rehuman", &[], Some("a \u{2260} b \u{2192} c \u{2022}\n"));
+    assert!(out.status.success(), "{}", stderr_text(&out));
+    assert_eq!(stdout_text(&out), "a != b -> c -\n");
 }
 
 #[test]

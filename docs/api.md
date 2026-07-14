@@ -44,11 +44,35 @@ When `keyboard_only=true`, the cleaner applies this order:
 3. If `extended_keyboard=true`, keep curated non-ASCII keyboard symbols (for example `U+20AC`, `U+00A3`, `U+00A7`, `U+2026`) without transliterating.
 4. Remove hidden joiners (ZWJ/ZWNJ) unless `preserve_joiners=true`.
 
+Within `Fold` and `Transliterate`, each non-ASCII character is resolved by the
+most specific rule that produces output:
+
+1. **Meaning-preserving overrides** (both modes): the negated relational
+   operators `≠`/`≮`/`≯` map to `!=`/`!<`/`!>`. (Their NFKD decomposition would
+   otherwise strip the negation and silently invert the comparison.)
+2. **NFKD compatibility fold** (both modes): `½` -> `1/2`, `™` -> `TM`,
+   fullwidth forms, Roman numerals, and Latin diacritics (`é` -> `e`).
+3. **Curated symbol table** (`Transliterate` only): common arrows, math and
+   relational operators, bullets, geometric shapes, check marks, and letterlike
+   marks (`→` -> `->`, `⇒` -> `==>`, `≤` -> `<=`, `•` -> `-`, `✓` -> `[x]`,
+   `©` -> `(c)`, `®` -> `(r)`).
+4. **Long-tail symbol fallback** (`Transliterate` only): remaining characters
+   from symbol/punctuation blocks (box drawing, number forms, currency signs)
+   transliterate via `deunicode` (`─│┌` -> `-|+`).
+5. Anything still unmapped is dropped.
+
+Letter scripts (CJK, Cyrillic, Greek, Arabic, ...) are never romanized: `世界`
+is dropped, not turned into `"Shi Jie"`. Pictographic emoji are likewise
+dropped per `emoji_policy`, never spelled out by name.
+
 Examples:
 
 - `"\u{00E9}"` in `"Caf\u{00E9}"` can map to `"Cafe"`
 - `"\u{00DF}"` in `"Stra\u{00DF}e"` can map to `"Strasse"` (with `Transliterate`)
 - `"\u{00BD}"` can map to `"1/2"` (with `Fold` or `Transliterate`)
+- `"a \u{2260} b"` maps to `"a != b"` (with `Fold` or `Transliterate`)
+- `"a \u{2192} b"` maps to `"a -> b"` (with `Transliterate`)
+- `"\u{00A9} 2026"` maps to `"(c) 2026"` (with `Transliterate`)
 
 ## TextCleaner
 
@@ -93,7 +117,7 @@ println!("dashes normalized: {}", result.stats.dashes_normalized);
 | ---------------------------- | ----------------------------------------------------------------- |
 | `remove_hidden`              | Drop default ignorable characters (ZWSP, BOM, etc.)               |
 | `remove_trailing_whitespace` | Trim spaces/tabs before newlines                                  |
-| `normalize_spaces`           | Map Unicode space separators to ASCII space                       |
+| `normalize_spaces`           | Map Unicode space separators to ASCII space; folds `U+2028`/`U+2029` line/paragraph separators to `\n` when `normalize_line_endings` is unset |
 | `normalize_dashes`           | Map dashes (em/en/minus) to ASCII hyphen                          |
 | `normalize_quotes`           | Map quotation marks to ASCII quotes                               |
 | `normalize_other`            | Misc fixes (ellipsis -> `...`, fraction slash -> `/`)               |

@@ -784,6 +784,8 @@ impl TextCleaner {
         out: &mut String,
         has_prior_output: bool,
     ) -> (u64, CleaningStats) {
+        // Without the `stats` feature, record_stat! never mutates the struct.
+        #[cfg_attr(not(feature = "stats"), allow(unused_mut))]
         let mut stats = CleaningStats::default();
         let mut changes = 0u64;
 
@@ -840,6 +842,33 @@ impl TextCleaner {
                 continue;
             }
 
+            // U+2028/U+2029 LINE/PARAGRAPH SEPARATOR: when line-ending
+            // normalization is on, `to_lf` already folded them to `\n` above.
+            // Otherwise fold them here as part of space normalization — mirroring
+            // the newline branch so surrounding whitespace is trimmed identically —
+            // instead of passing them through (or dropping them in keyboard mode).
+            if self.options.normalize_spaces
+                && self.options.normalize_line_endings.is_none()
+                && matches!(grapheme, "\u{2028}" | "\u{2029}")
+            {
+                if trim {
+                    if pending_ws > 0 {
+                        record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
+                        pending_ws = 0;
+                        cap_next_whitespace = false;
+                    }
+                } else {
+                    flush_pending_whitespace(out, pending_ws, collapse);
+                    pending_ws = 0;
+                    cap_next_whitespace = false;
+                }
+                out.push('\n');
+                record_change!(changes, stats, spaces_normalized);
+                emitted_anything = true;
+                drop_leading_whitespace = false;
+                continue;
+            }
+
             let mut emoji_cluster_cache: Option<bool> = None;
             let mut ensure_emoji_cluster = |classifier: &mut Option<EmojiClassifier>| -> bool {
                 if let Some(value) = emoji_cluster_cache {
@@ -862,6 +891,11 @@ impl TextCleaner {
             cluster_buffer.clear();
             cluster_buffer.reserve(grapheme.len());
             let mut emitted_directly = false;
+            // Per-grapheme tally of interior default-ignorable chars (VS16/ZWJ) we
+            // remove. Committed to `hidden_chars_removed` only if the cluster is
+            // emitted; discarded if the whole cluster is dropped as an emoji, so a
+            // dropped emoji is billed once (emojis_dropped) rather than twice.
+            let mut cluster_hidden_removed = 0u64;
 
             for mut c in grapheme.chars() {
                 #[cfg(feature = "security")]
@@ -881,6 +915,7 @@ impl TextCleaner {
                         cluster_buffer.push(c);
                     } else {
                         record_change!(changes, stats, hidden_chars_removed);
+                        cluster_hidden_removed = cluster_hidden_removed.saturating_add(1);
                     }
                     continue;
                 }
@@ -1015,6 +1050,18 @@ impl TextCleaner {
                     emitted_anything = true;
                     drop_leading_whitespace = false;
                 } else if is_emoji_cluster {
+                    // The emoji cluster is dropped as a unit; its interior VS16/ZWJ
+                    // removals are part of that single drop, not separate hidden
+                    // removals. Roll them back so changes_made bills the cluster once.
+                    if cluster_hidden_removed > 0 {
+                        changes = changes.saturating_sub(cluster_hidden_removed);
+                        #[cfg(feature = "stats")]
+                        {
+                            stats.hidden_chars_removed = stats
+                                .hidden_chars_removed
+                                .saturating_sub(cluster_hidden_removed);
+                        }
+                    }
                     record_change!(changes, stats, emojis_dropped);
                     cluster_buffer.clear();
                     cap_next_whitespace = true;
@@ -1115,6 +1162,9 @@ impl TextCleaner {
                 self.options.unicode_normalization,
                 UnicodeNormalizationMode::None
             )
+            // keyboard_only strips ASCII control chars (except \n \r \t) regardless
+            // of remove_control_chars; the fast path must not silently keep them.
+            && (!self.options.keyboard_only || text.bytes().all(is_fast_path_safe_ascii_byte))
     }
 }
 
@@ -1337,6 +1387,13 @@ fn is_keyboard_allowed(c: char, extended_keyboard: bool) -> bool {
     is_keyboard_ascii(c) || (extended_keyboard && is_extended_keyboard_char(c))
 }
 
+/// ASCII byte that `keyboard_only` leaves unchanged, so an all-ASCII input is
+/// safe to return verbatim via the fast path: printable ASCII plus the three
+/// retained whitespace controls. Excludes C0 controls and DEL (0x7F).
+fn is_fast_path_safe_ascii_byte(b: u8) -> bool {
+    matches!(b, b'\n' | b'\r' | b'\t') || (0x20..0x7F).contains(&b)
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct LineEndingCounts {
     crlf: u64,
@@ -1436,11 +1493,22 @@ fn rewrite_cluster_to_keyboard_ascii(
             continue;
         }
 
+        // Precedence, most-specific first:
+        //   1. compat_override  — meaning-preserving ASCII for chars whose NFKD
+        //      would silently invert sense (`≠` -> `=`). Runs in BOTH Fold and
+        //      Transliterate, *before* NFKD, so the negation is never lost.
+        //   2. NFKD compatibility fold — `½`->`1/2`, `™`->`TM`, fullwidth, etc.
+        //   3. curated symbol map + scoped deunicode — Transliterate only.
+        //   4. drop.
         let mapped = match policy {
             NonAsciiPolicy::Drop => false,
-            NonAsciiPolicy::Fold => append_folded_non_ascii(c, &mut out, extended_keyboard),
+            NonAsciiPolicy::Fold => {
+                append_mapping(compat_override(c), &mut out, extended_keyboard)
+                    || append_folded_non_ascii(c, &mut out, extended_keyboard)
+            }
             NonAsciiPolicy::Transliterate => {
-                append_folded_non_ascii(c, &mut out, extended_keyboard)
+                append_mapping(compat_override(c), &mut out, extended_keyboard)
+                    || append_folded_non_ascii(c, &mut out, extended_keyboard)
                     || append_transliterated_non_ascii(c, &mut out, extended_keyboard)
             }
         };
@@ -1466,7 +1534,16 @@ fn rewrite_cluster_to_keyboard_ascii(
 #[cfg(feature = "unorm")]
 fn append_folded_non_ascii(c: char, out: &mut String, extended_keyboard: bool) -> bool {
     let mut added = false;
+    let source_is_space = c.is_whitespace();
     for decomposed in c.to_string().nfkd() {
+        // Spacing-modifier diacritics (´ ¨ ¯ ¸ ˜ …) decompose to <space + combining
+        // mark>. Emitting that leading space turns the glyph into whitespace, which
+        // both mistranslates it and breaks idempotence (the space later escapes
+        // trailing-whitespace trimming). Suppress decomposition spaces unless the
+        // source character was itself whitespace (e.g. NBSP -> space is correct).
+        if decomposed == ' ' && !source_is_space {
+            continue;
+        }
         if is_keyboard_allowed(decomposed, extended_keyboard) {
             out.push(decomposed);
             added = true;
@@ -1489,18 +1566,43 @@ fn append_folded_non_ascii(c: char, out: &mut String, _: bool) -> bool {
 }
 
 fn append_transliterated_non_ascii(c: char, out: &mut String, extended_keyboard: bool) -> bool {
-    let before = out.len();
-    if let Some(override_mapping) = transliteration_override(c) {
-        append_ascii_mapping(override_mapping, out, extended_keyboard);
-        return out.len() > before;
+    // Curated, high-quality ASCII first: Latin letters that must be spelled out
+    // (ß -> ss) and the symbol glyphs LLMs emit constantly (-> for arrows, etc.).
+    if let Some(mapping) = transliteration_override(c).or_else(|| symbol_translit(c)) {
+        return append_mapping(Some(mapping), out, extended_keyboard);
     }
 
-    if is_latin_transliteration_candidate(c) {
+    // Long-tail fallback via deunicode, scoped to Latin *or* symbol blocks. The
+    // scope is deliberate: deunicode romanizes scripts (世 -> "Shi "), which we do
+    // NOT want, so script characters are never passed to it and continue to drop.
+    // Emoji-property chars are excluded for the same reason: deunicode expands
+    // them to English names (✂ -> "scissors"), which is worse than dropping them
+    // with the rest of the emoji. Curated entries above still win for the emoji
+    // marks we do want (© ® ✓ …). The output is trimmed because deunicode pads
+    // some mappings with spaces that would escape trailing-whitespace trimming.
+    if is_latin_transliteration_candidate(c)
+        || (is_symbol_transliteration_candidate(c) && !is_emoji(c))
+    {
         if let Some(mapped) = deunicode_char(c) {
-            append_ascii_mapping(mapped, out, extended_keyboard);
+            return append_mapping(Some(mapped.trim()), out, extended_keyboard);
         }
     }
-    out.len() > before
+    false
+}
+
+/// Apply an optional ASCII mapping, returning whether anything was emitted.
+/// Every char is funneled through [`append_ascii_mapping`], which discards any
+/// non-keyboard output, so a table entry can never break the keyboard-only ASCII
+/// invariant even if it is wrong.
+fn append_mapping(mapping: Option<&str>, out: &mut String, extended_keyboard: bool) -> bool {
+    match mapping {
+        Some(text) => {
+            let before = out.len();
+            append_ascii_mapping(text, out, extended_keyboard);
+            out.len() > before
+        }
+        None => false,
+    }
 }
 
 fn is_latin_transliteration_candidate(c: char) -> bool {
@@ -1514,6 +1616,185 @@ fn is_latin_transliteration_candidate(c: char) -> bool {
             | 0x10780..=0x107BF
             | 0x1DF00..=0x1DFFF
     )
+}
+
+/// Symbol / punctuation blocks whose members may be transliterated via
+/// `deunicode`. Deliberately distinct from script blocks (CJK, Cyrillic, Greek,
+/// Arabic, …), which are excluded so they keep dropping rather than being
+/// romanized. Used only as the fallback gate *after* the curated `symbol_translit`
+/// table, which gives nicer ASCII for the common glyphs.
+fn is_symbol_transliteration_candidate(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x2000..=0x206F   // General Punctuation
+            | 0x2070..=0x209F // Superscripts and Subscripts
+            | 0x20A0..=0x20CF // Currency Symbols
+            | 0x2100..=0x214F // Letterlike Symbols (™ © ® ℠ № …)
+            | 0x2150..=0x218F // Number Forms (⅓, Ⅻ, …)
+            | 0x2190..=0x21FF // Arrows
+            | 0x2200..=0x22FF // Mathematical Operators
+            | 0x2300..=0x23FF // Miscellaneous Technical (⌘ ⌥ ⏎ …)
+            | 0x2460..=0x24FF // Enclosed Alphanumerics
+            | 0x2500..=0x257F // Box Drawing
+            | 0x2580..=0x259F // Block Elements
+            | 0x25A0..=0x25FF // Geometric Shapes
+            | 0x2600..=0x26FF // Miscellaneous Symbols
+            | 0x2700..=0x27BF // Dingbats
+            | 0x27C0..=0x27EF // Miscellaneous Mathematical Symbols-A
+            | 0x27F0..=0x27FF // Supplemental Arrows-A
+            | 0x2900..=0x297F // Supplemental Arrows-B
+            | 0x2980..=0x29FF // Miscellaneous Mathematical Symbols-B
+            | 0x2A00..=0x2AFF // Supplemental Mathematical Operators
+            | 0x2B00..=0x2BFF // Miscellaneous Symbols and Arrows
+    )
+}
+
+/// Meaning-preserving ASCII for characters whose NFKD decomposition would
+/// otherwise *invert* their sense: negated relational operators decompose to the
+/// un-negated base plus U+0338 COMBINING LONG SOLIDUS OVERLAY, the overlay is then
+/// dropped, and `≠` becomes `=`. Applied before NFKD in every fold/translit mode.
+/// Only the three operators whose base is itself ASCII can actually invert today;
+/// they are the mandatory members. See `negated_operators_are_not_inverted`.
+fn compat_override(c: char) -> Option<&'static str> {
+    Some(match c {
+        '\u{2260}' => "!=", // ≠ NOT EQUAL TO     (NFKD -> "=")
+        '\u{226E}' => "!<", // ≮ NOT LESS-THAN    (NFKD -> "<")
+        '\u{226F}' => "!>", // ≯ NOT GREATER-THAN (NFKD -> ">")
+        _ => return None,
+    })
+}
+
+/// Curated symbol -> ASCII table for the glyphs LLMs emit constantly. Hand-tuned
+/// because `deunicode`'s symbol mappings are often crude (`→`->`-`, `⇒`->`=`); this
+/// gives `->`, `==>`, etc. Anything not listed falls through to the `deunicode`
+/// fallback gated by [`is_symbol_transliteration_candidate`]. Do NOT add characters
+/// that NFKD already folds well (`™`->`TM`, `½`->`1/2`); NFKD runs first and such
+/// entries would be dead code.
+fn symbol_translit(c: char) -> Option<&'static str> {
+    Some(match c {
+        // --- Arrows (common; deunicode handles the long tail). Double arrows use
+        //     `==>` (not `=>`) so they never collide with `≤`/`≥` output. ---
+        '\u{2192}' => "->",
+        '\u{2190}' => "<-",
+        '\u{2194}' => "<->",
+        '\u{2191}' => "^",
+        '\u{2193}' => "v",
+        '\u{2195}' => "^v",
+        '\u{21D2}' => "==>",
+        '\u{21D0}' => "<==",
+        '\u{21D4}' => "<==>",
+        '\u{21A6}' => "|->",
+        '\u{21B5}' => "<-'",
+        '\u{23CE}' => "<-'",
+        '\u{27F6}' => "-->",
+        '\u{27F5}' => "<--",
+        '\u{27F7}' => "<-->",
+        '\u{27F9}' => "==>",
+        '\u{27F8}' => "<==",
+        '\u{27FA}' => "<==>",
+        '\u{2794}' => "->",
+        '\u{2799}' => "->",
+        '\u{279C}' => "->",
+        '\u{27A4}' => "->",
+        // --- Relational / math operators with no ASCII NFKD (else dropped) ---
+        '\u{2264}' => "<=",
+        '\u{2265}' => ">=",
+        '\u{2243}' => "~=",
+        '\u{2245}' => "~=",
+        '\u{2248}' => "~=",
+        '\u{2261}' => "===",
+        '\u{221E}' => "inf",
+        '\u{00B1}' => "+/-",
+        '\u{2213}' => "-/+",
+        '\u{2211}' => "sum",
+        '\u{220F}' => "prod",
+        '\u{221A}' => "sqrt",
+        '\u{222B}' => "int",
+        '\u{2202}' => "d",
+        '\u{2207}' => "grad",
+        '\u{2206}' => "delta",
+        '\u{2205}' => "{}",
+        '\u{2208}' => "in",
+        '\u{220B}' => "ni",
+        '\u{2227}' => "and",
+        '\u{2228}' => "or",
+        '\u{00AC}' => "!",
+        '\u{2200}' => "forall",
+        '\u{2203}' => "exists",
+        // --- Negated operators that drop today: give meaning, never invert ---
+        '\u{2270}' => "!<=",
+        '\u{2271}' => "!>=",
+        '\u{2209}' => "!in",
+        '\u{220C}' => "!ni",
+        '\u{2224}' => "!|",
+        '\u{2226}' => "!||",
+        '\u{2241}' => "!~",
+        '\u{2244}' => "!~=",
+        '\u{2249}' => "!~~",
+        '\u{2262}' => "!==",
+        // --- Multiplication / division / dots / bullets ---
+        '\u{00D7}' => "x",
+        '\u{00F7}' => "/",
+        '\u{22C5}' => "*",
+        '\u{2219}' => "*",
+        '\u{00B7}' => "*",
+        '\u{2022}' => "-",
+        '\u{2023}' => "-",
+        '\u{2043}' => "-",
+        '\u{2027}' => "-",
+        '\u{25E6}' => "o",
+        // --- Geometric shapes / stars / checks ---
+        '\u{2605}' => "*",
+        '\u{2606}' => "*",
+        '\u{25CF}' => "*",
+        '\u{25CB}' => "o",
+        '\u{25C9}' => "*",
+        '\u{25A0}' => "#",
+        '\u{25A1}' => "[ ]",
+        '\u{25B6}' => ">",
+        '\u{25C0}' => "<",
+        '\u{25B2}' => "^",
+        '\u{25BC}' => "v",
+        '\u{25B8}' => ">",
+        '\u{25C2}' => "<",
+        '\u{25C6}' => "<>",
+        '\u{25C7}' => "<>",
+        '\u{2713}' => "[x]",
+        '\u{2714}' => "[x]",
+        '\u{2717}' => "[ ]",
+        '\u{2718}' => "[ ]",
+        '\u{2610}' => "[ ]",
+        '\u{2611}' => "[x]",
+        '\u{2612}' => "[x]",
+        // --- Letterlike marks (dropped as "emoji" today) ---
+        '\u{00A9}' => "(c)",
+        '\u{00AE}' => "(r)",
+        '\u{2117}' => "(p)",
+        '\u{2120}' => "(sm)",
+        '\u{2116}' => "No.",
+        '\u{00B0}' => "deg",
+        '\u{00B5}' => "u",
+        '\u{2126}' => "ohm",
+        // --- Spacing-modifier diacritics (NFKD folds these to a bare space; the
+        //     fold path suppresses that space, so map them to sensible ASCII here) ---
+        '\u{00B4}' => "'",  // ´ ACUTE ACCENT
+        '\u{00A8}' => "\"", // ¨ DIAERESIS
+        '\u{00AF}' => "-",  // ¯ MACRON
+        '\u{00B8}' => ",",  // ¸ CEDILLA
+        '\u{02C6}' => "^",  // ˆ MODIFIER LETTER CIRCUMFLEX ACCENT
+        '\u{02DC}' => "~",  // ˜ SMALL TILDE
+        // --- Technical / keyboard keys (Miscellaneous Technical) ---
+        '\u{2318}' => "Cmd",
+        '\u{2325}' => "Opt",
+        '\u{2303}' => "Ctrl",
+        '\u{21E7}' => "Shift",
+        '\u{2387}' => "Alt",
+        '\u{238B}' => "Esc",
+        '\u{232B}' => "Bksp",
+        '\u{2326}' => "Del",
+        '\u{23CF}' => "Eject",
+        _ => return None,
+    })
 }
 
 fn append_ascii_mapping(mapped: &str, out: &mut String, extended_keyboard: bool) {
@@ -1594,6 +1875,7 @@ mod tests {
         });
         let out = c.clean("Hello\u{200B}World");
         assert_eq!(out.text, "HelloWorld");
+        #[cfg(feature = "stats")]
         assert_eq!(out.stats.hidden_chars_removed, 1);
     }
 
@@ -1602,6 +1884,7 @@ mod tests {
         let c = TextCleaner::new(CleaningOptions::default());
         let out = c.clean("Hello\u{180E}World");
         assert_eq!(out.text, "HelloWorld");
+        #[cfg(feature = "stats")]
         assert!(out.stats.hidden_chars_removed >= 1);
     }
 
@@ -1610,10 +1893,13 @@ mod tests {
         let c = TextCleaner::new(CleaningOptions::default());
         let out = c.clean("\u{201C}Hi\u{201D}\u{00A0}\u{2014} ok…");
         assert_eq!(out.text, "\"Hi\" - ok...");
-        assert!(out.stats.spaces_normalized >= 1);
-        assert!(out.stats.dashes_normalized >= 1);
-        assert!(out.stats.quotes_normalized >= 2);
-        assert!(out.stats.other_normalized >= 1);
+        #[cfg(feature = "stats")]
+        {
+            assert!(out.stats.spaces_normalized >= 1);
+            assert!(out.stats.dashes_normalized >= 1);
+            assert!(out.stats.quotes_normalized >= 2);
+            assert!(out.stats.other_normalized >= 1);
+        }
     }
 
     #[test]
@@ -1624,6 +1910,7 @@ mod tests {
         });
         let out = c.clean("a  \n b\t\t\n");
         assert_eq!(out.text, "a\n b\n");
+        #[cfg(feature = "stats")]
         assert!(out.stats.trailing_whitespace_removed >= 3);
     }
 
@@ -1646,6 +1933,7 @@ mod tests {
         });
         let out = c.clean("Hello😀世界");
         assert_eq!(out.text, "Hello😀");
+        #[cfg(feature = "stats")]
         assert!(out.stats.non_keyboard_removed >= 2);
     }
 
@@ -1657,6 +1945,7 @@ mod tests {
         });
         let out = c.clean("a\r\nb\rc\u{0085}");
         assert_eq!(out.text, "a\nb\nc\n");
+        #[cfg(feature = "stats")]
         assert!(out.stats.line_endings_normalized >= 3);
     }
 
@@ -1667,6 +1956,7 @@ mod tests {
         let c = TextCleaner::new(options);
         let out = c.clean("a\u{2028}b\u{2029}c");
         assert_eq!(out.text, "a\nb\nc");
+        #[cfg(feature = "stats")]
         assert_eq!(out.stats.line_endings_normalized, 2);
     }
 
@@ -1677,6 +1967,7 @@ mod tests {
         let c = TextCleaner::new(options);
         let out = c.clean("a\nb\n");
         assert_eq!(out.text, "a\r\nb\r\n");
+        #[cfg(feature = "stats")]
         assert_eq!(out.stats.line_endings_normalized, 2);
     }
 
@@ -1684,11 +1975,14 @@ mod tests {
     fn default_cleaning_matches_keyboard_equivalent() {
         let out = clean("“Hello—world…”\u{00A0}😀");
         assert_eq!(out.text, "\"Hello-world...\"");
-        assert_eq!(out.stats.quotes_normalized, 2);
-        assert_eq!(out.stats.dashes_normalized, 1);
-        assert_eq!(out.stats.other_normalized, 1);
-        assert_eq!(out.stats.spaces_normalized, 1);
-        assert_eq!(out.stats.emojis_dropped, 1);
+        #[cfg(feature = "stats")]
+        {
+            assert_eq!(out.stats.quotes_normalized, 2);
+            assert_eq!(out.stats.dashes_normalized, 1);
+            assert_eq!(out.stats.other_normalized, 1);
+            assert_eq!(out.stats.spaces_normalized, 1);
+            assert_eq!(out.stats.emojis_dropped, 1);
+        }
         assert_eq!(out.changes_made, 7);
     }
 
@@ -1700,8 +1994,11 @@ mod tests {
         });
         let out = cleaner.clean("Ascii😀世界");
         assert_eq!(out.text, "Ascii");
-        assert_eq!(out.stats.emojis_dropped, 1);
-        assert!(out.stats.non_keyboard_removed >= 2);
+        #[cfg(feature = "stats")]
+        {
+            assert_eq!(out.stats.emojis_dropped, 1);
+            assert!(out.stats.non_keyboard_removed >= 2);
+        }
     }
 
     #[test]
@@ -1709,6 +2006,7 @@ mod tests {
         let cleaner = TextCleaner::new(CleaningOptions::default());
         let out = cleaner.clean("Caf\u{00E9} d\u{00E9}j\u{00E0} vu");
         assert_eq!(out.text, "Cafe deja vu");
+        #[cfg(feature = "stats")]
         assert!(out.stats.non_keyboard_transliterated >= 3);
     }
 
@@ -1717,6 +2015,7 @@ mod tests {
         let cleaner = TextCleaner::new(CleaningOptions::default());
         let out = cleaner.clean("Stra\u{00DF}e \u{00C6}sir \u{00F8}l \u{0153}uvre");
         assert_eq!(out.text, "Strasse AEsir ol oeuvre");
+        #[cfg(feature = "stats")]
         assert!(out.stats.non_keyboard_transliterated >= 4);
     }
 
@@ -1730,22 +2029,27 @@ mod tests {
         .clean("Stra\u{00DF}e \u{00BD} \u{2122}");
         assert_eq!(drop.text, "Strae");
 
-        let fold = TextCleaner::new(
-            CleaningOptions::builder()
-                .non_ascii_policy(NonAsciiPolicy::Fold)
-                .build(),
-        )
-        .clean("Stra\u{00DF}e \u{00BD} \u{2122}");
-        assert_eq!(fold.text, "Strae 1/2 TM");
+        // ½ -> "1/2" and ™ -> "TM" come from NFKD, which needs `unorm`.
+        #[cfg(feature = "unorm")]
+        {
+            let fold = TextCleaner::new(
+                CleaningOptions::builder()
+                    .non_ascii_policy(NonAsciiPolicy::Fold)
+                    .build(),
+            )
+            .clean("Stra\u{00DF}e \u{00BD} \u{2122}");
+            assert_eq!(fold.text, "Strae 1/2 TM");
 
-        let transliterate = TextCleaner::new(
-            CleaningOptions::builder()
-                .non_ascii_policy(NonAsciiPolicy::Transliterate)
-                .build(),
-        )
-        .clean("Stra\u{00DF}e \u{00BD} \u{2122}");
-        assert_eq!(transliterate.text, "Strasse 1/2 TM");
-        assert!(transliterate.stats.non_keyboard_transliterated >= 3);
+            let transliterate = TextCleaner::new(
+                CleaningOptions::builder()
+                    .non_ascii_policy(NonAsciiPolicy::Transliterate)
+                    .build(),
+            )
+            .clean("Stra\u{00DF}e \u{00BD} \u{2122}");
+            assert_eq!(transliterate.text, "Strasse 1/2 TM");
+            #[cfg(feature = "stats")]
+            assert!(transliterate.stats.non_keyboard_transliterated >= 3);
+        }
     }
 
     #[test]
@@ -1843,8 +2147,11 @@ mod tests {
         let cleaner = TextCleaner::new(CleaningOptions::default());
         let out = cleaner.clean("I — super — man – 💪");
         assert_eq!(out.text, "I - super - man -");
-        assert_eq!(out.stats.dashes_normalized, 3);
-        assert_eq!(out.stats.emojis_dropped, 1);
+        #[cfg(feature = "stats")]
+        {
+            assert_eq!(out.stats.dashes_normalized, 3);
+            assert_eq!(out.stats.emojis_dropped, 1);
+        }
         assert_eq!(out.changes_made, 5);
     }
 
@@ -1856,6 +2163,7 @@ mod tests {
             out.text,
             "Angular \"quote\" \"marks\" looks\" like Christmas \"\" tree"
         );
+        #[cfg(feature = "stats")]
         assert_eq!(out.stats.quotes_normalized, 7);
         assert_eq!(out.changes_made, 7);
     }
@@ -1865,6 +2173,7 @@ mod tests {
         let cleaner = TextCleaner::new(CleaningOptions::default());
         let out = cleaner.clean("‹left› ‟double‟ ′prime′ ″double″");
         assert_eq!(out.text, "'left' \"double\" 'prime' \"double\"");
+        #[cfg(feature = "stats")]
         assert!(out.stats.quotes_normalized >= 6);
     }
 
@@ -1873,6 +2182,7 @@ mod tests {
         let cleaner = TextCleaner::new(CleaningOptions::default());
         let out = cleaner.clean("5 \u{2212} 3");
         assert_eq!(out.text, "5 - 3");
+        #[cfg(feature = "stats")]
         assert!(out.stats.dashes_normalized >= 1);
     }
 
@@ -1881,6 +2191,7 @@ mod tests {
         let cleaner = TextCleaner::new(CleaningOptions::default());
         let out = cleaner.clean("5\u{202F}MB");
         assert_eq!(out.text, "5 MB");
+        #[cfg(feature = "stats")]
         assert_eq!(out.stats.spaces_normalized, 1);
         assert_eq!(out.changes_made, 1);
     }
@@ -1898,6 +2209,7 @@ mod tests {
             let input = format!("a{ch}b");
             let out = cleaner.clean(&input);
             assert_eq!(out.text, "a b", "failed for U+{:04X}", ch as u32);
+            #[cfg(feature = "stats")]
             assert_eq!(
                 out.stats.spaces_normalized, 1,
                 "expected a single normalization for U+{:04X}",
@@ -1911,6 +2223,7 @@ mod tests {
         let cleaner = TextCleaner::new(CleaningOptions::default());
         let out = cleaner.clean("1\u{2044}2");
         assert_eq!(out.text, "1/2");
+        #[cfg(feature = "stats")]
         assert_eq!(out.stats.other_normalized, 1);
     }
 
@@ -1934,6 +2247,7 @@ mod tests {
         });
         let out = cleaner.clean("👍\u{FE0F}");
         assert_eq!(out.text, "");
+        #[cfg(feature = "stats")]
         assert_eq!(out.stats.emojis_dropped, 1);
     }
 
@@ -1957,5 +2271,159 @@ mod tests {
             options.unicode_normalization,
             UnicodeNormalizationMode::None
         );
+    }
+
+    // ---- F2: negation must never be inverted ----
+
+    #[test]
+    fn negated_operators_are_not_inverted() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        // The three operators whose ASCII base survives NFKD and would otherwise
+        // flip; output must carry the negation, never the bare base operator.
+        assert_eq!(c.clean("a \u{2260} b").text, "a != b"); // was "a = b"
+        assert_eq!(c.clean("a \u{226E} b").text, "a !< b"); // was "a < b"
+        assert_eq!(c.clean("a \u{226F} b").text, "a !> b"); // was "a > b"
+        assert_ne!(c.clean("\u{2260}").text, "=");
+    }
+
+    #[test]
+    fn fold_mode_also_preserves_negation() {
+        let fold = TextCleaner::new(
+            CleaningOptions::builder()
+                .non_ascii_policy(NonAsciiPolicy::Fold)
+                .build(),
+        );
+        // compat_override runs before NFKD in Fold too, so ≠ stays "!=", not "=".
+        assert_eq!(fold.clean("a \u{2260} b").text, "a != b");
+    }
+
+    // ---- F3: symbols transliterate instead of being deleted ----
+
+    #[test]
+    fn arrows_transliterate_to_ascii() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("a \u{2192} b").text, "a -> b"); // →
+        assert_eq!(c.clean("a \u{2190} b").text, "a <- b"); // ←
+        assert_eq!(c.clean("a \u{2194} b").text, "a <-> b"); // ↔
+        assert_eq!(c.clean("a \u{21D2} b").text, "a ==> b"); // ⇒
+        assert_eq!(c.clean("a \u{27F6} b").text, "a --> b"); // ⟶ (long)
+    }
+
+    #[test]
+    fn math_and_relational_operators_transliterate() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("a \u{2264} b").text, "a <= b"); // ≤
+        assert_eq!(c.clean("a \u{2265} b").text, "a >= b"); // ≥
+        assert_eq!(c.clean("a \u{2248} b").text, "a ~= b"); // ≈
+        assert_eq!(c.clean("5 \u{00B1} 1").text, "5 +/- 1"); // ±
+    }
+
+    #[test]
+    fn bullets_geometric_and_marks_transliterate() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("\u{2022} item").text, "- item"); // •
+        assert_eq!(c.clean("\u{2605} star").text, "* star"); // ★
+        assert_eq!(c.clean("\u{00A9} 2026").text, "(c) 2026"); // © (was dropped as "emoji")
+        assert_eq!(c.clean("Acme\u{00AE}").text, "Acme(r)"); // ®
+    }
+
+    #[test]
+    fn long_tail_symbols_use_deunicode_fallback() {
+        // Box-drawing is not in the curated table; it reaches deunicode via the
+        // widened symbol gate (─ -> "-", │ -> "|", ┌ -> "+").
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("\u{2500}\u{2502}\u{250C}").text, "-|+");
+    }
+
+    #[test]
+    fn scripts_still_drop_and_are_not_romanized() {
+        // The symbol gate must not enable deunicode for letter scripts.
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("ok \u{4E16}\u{754C}").text, "ok"); // 世界 dropped, not "Shi Jie"
+        assert_eq!(c.clean("ok \u{0430}\u{0431}").text, "ok"); // Cyrillic dropped
+        assert_eq!(c.clean("ok \u{03B1}\u{03B2}").text, "ok"); // Greek dropped
+    }
+
+    // ---- F1: ASCII fast path must respect keyboard_only ----
+
+    #[test]
+    fn fast_path_respects_keyboard_only() {
+        // minimal() leaves trim/collapse/control off, which is what makes the
+        // all-ASCII fast path reachable; keyboard_only must still strip C0/DEL.
+        let c = TextCleaner::new(CleaningOptions {
+            keyboard_only: true,
+            ..CleaningOptions::minimal()
+        });
+        let out = c.clean("a\u{0001}b\u{007F}c");
+        assert_eq!(out.text, "abc");
+    }
+
+    // ---- F4: a dropped emoji is billed once, not also as hidden removals ----
+
+    #[test]
+    fn dropped_emoji_not_double_counted() {
+        let c = TextCleaner::new(CleaningOptions {
+            keyboard_only: true,
+            emoji_policy: EmojiPolicy::Drop,
+            ..CleaningOptions::default()
+        });
+        let out = c.clean("\u{1F44D}\u{FE0F}"); // 👍 + VS16
+        assert_eq!(out.text, "");
+        assert_eq!(out.changes_made, 1);
+        #[cfg(feature = "stats")]
+        {
+            assert_eq!(out.stats.emojis_dropped, 1);
+            assert_eq!(out.stats.hidden_chars_removed, 0); // VS16 not separately billed
+        }
+
+        let family = c.clean("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"); // ZWJ family
+        assert_eq!(family.text, "");
+        assert_eq!(family.changes_made, 1);
+        #[cfg(feature = "stats")]
+        {
+            assert_eq!(family.stats.emojis_dropped, 1);
+            assert_eq!(family.stats.hidden_chars_removed, 0); // two interior ZWJ not billed
+        }
+    }
+
+    // ---- F7: U+2028/U+2029 fold to \n without normalize_line_endings ----
+
+    #[test]
+    fn line_separators_fold_to_newline_without_line_ending_option() {
+        // Default preset (keyboard_only, normalize_line_endings = None).
+        let out = clean("a\u{2028}b\u{2029}c");
+        assert_eq!(out.text, "a\nb\nc");
+        #[cfg(feature = "stats")]
+        assert_eq!(out.stats.spaces_normalized, 2);
+
+        // Non-keyboard mode: previously passed through unchanged.
+        let c = TextCleaner::new(CleaningOptions::builder().keyboard_only(false).build());
+        assert_eq!(c.clean("a\u{2028}b").text, "a\nb");
+
+        // Trailing whitespace before the separator trims like a real newline.
+        assert_eq!(clean("a \u{2028}b").text, "a\nb");
+
+        // humanize collapses whitespace but keeps the folded newline. (Its
+        // preset requests NFKC, so it needs `unorm` to run at all.)
+        #[cfg(feature = "unorm")]
+        assert_eq!(humanize("x\u{2028}y").text, "x\ny");
+    }
+
+    // ---- idempotence: clean(clean(x)) == clean(x) on representative input ----
+
+    #[test]
+    fn cleaning_is_idempotent_on_symbol_samples() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        for s in [
+            "a \u{2192} b \u{2264} c",
+            "\u{2260} \u{00A9} \u{2605} \u{2022}",
+            "caf\u{00E9} \u{2014} \u{00BD}",
+            "\u{1F44D}\u{FE0F} done",
+            "\u{00B8}\u{00B4}\u{00A8}", // spacing diacritics: the F8 regression
+        ] {
+            let once = c.clean(s).text.into_owned();
+            let twice = c.clean(&once).text.into_owned();
+            assert_eq!(once, twice, "not idempotent for {s:?}");
+        }
     }
 }

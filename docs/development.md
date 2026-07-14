@@ -5,7 +5,8 @@
 > [!TIP]
 > Interested in seeing a feature sooner? Open a request at [GitHub Issues](https://github.com/pszemraj/rehuman/issues/new/choose).
 
-- [ ] Expand transliteration coverage and tune script-specific mappings beyond Latin-focused defaults
+- [x] Expand transliteration coverage beyond Latin-focused defaults (curated symbol table + scoped `deunicode` fallback for arrows, math operators, bullets, shapes, and letterlike marks)
+- [ ] Tune script-specific mappings (letter scripts currently drop by design; script-aware opt-in transliteration is unexplored)
 - [ ] Extend `extended_keyboard` coverage with script-specific opt-in profiles
 - [ ] Tune preset-level defaults for `preserve_joiners` in script-sensitive contexts
 - [ ] Handle additional ellipsis/compatibility punctuation variants

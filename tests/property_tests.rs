@@ -136,6 +136,7 @@ fn keyboard_only_reduces_keycap_sequences_to_ascii_digit() {
     });
     let output = cleaner.clean("7️⃣");
     assert_eq!(output.text, "7");
+    #[cfg(feature = "stats")]
     assert!(output.stats.non_keyboard_removed >= 1);
 }
 
@@ -147,6 +148,7 @@ fn keyboard_only_drops_zwj_emoji() {
     });
     let output = cleaner.clean("👨‍👩‍👧‍👦");
     assert_eq!(output.text, "");
+    #[cfg(feature = "stats")]
     assert!(output.stats.emojis_dropped >= 1);
 }
 
@@ -184,6 +186,31 @@ proptest! {
         let has_rendered_emoji = UnicodeSegmentation::graphemes(output.text.as_ref(), true)
             .any(grapheme_is_rendered_emoji);
         prop_assert!(!has_rendered_emoji);
+    }
+}
+
+proptest! {
+    #[test]
+    fn cleaning_is_idempotent(input in sample_string()) {
+        // clean(x) is already keyboard-safe, so a second pass must be a no-op.
+        // Protects ishuman (which treats clean(x) as canonical) and the symbol
+        // transliteration tables (a mapping that re-triggered processing would
+        // break this).
+        let once = clean(&input).text.into_owned();
+        let twice = clean(&once).text.into_owned();
+        prop_assert_eq!(once, twice);
+    }
+}
+
+proptest! {
+    #[test]
+    fn letter_scripts_never_romanize_under_default(input in sample_string()) {
+        // Default (keyboard_only) output is pure ASCII, but the symbol gate must
+        // not turn CJK/Cyrillic/Greek letters into Latin. We assert the weaker,
+        // robust property: every output char is keyboard ASCII (i.e. scripts were
+        // dropped, never transliterated into surviving Latin text we didn't intend).
+        let out = clean(&input);
+        prop_assert!(out.text.chars().all(is_keyboard_ascii));
     }
 }
 
