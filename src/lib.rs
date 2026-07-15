@@ -825,17 +825,15 @@ impl TextCleaner {
             }
 
             if is_newline_grapheme(grapheme) {
-                if trim {
-                    if pending_ws > 0 {
-                        record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
-                        pending_ws = 0;
-                        cap_next_whitespace = false;
-                    }
-                } else {
-                    flush_pending_whitespace(out, pending_ws, collapse);
-                    pending_ws = 0;
-                    cap_next_whitespace = false;
-                }
+                finish_pending_whitespace_before_break(
+                    out,
+                    &mut pending_ws,
+                    &mut cap_next_whitespace,
+                    trim,
+                    collapse,
+                    &mut changes,
+                    &mut stats,
+                );
                 out.push_str(grapheme);
                 emitted_anything = true;
                 drop_leading_whitespace = false;
@@ -851,17 +849,15 @@ impl TextCleaner {
                 && self.options.normalize_line_endings.is_none()
                 && matches!(grapheme, "\u{2028}" | "\u{2029}")
             {
-                if trim {
-                    if pending_ws > 0 {
-                        record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
-                        pending_ws = 0;
-                        cap_next_whitespace = false;
-                    }
-                } else {
-                    flush_pending_whitespace(out, pending_ws, collapse);
-                    pending_ws = 0;
-                    cap_next_whitespace = false;
-                }
+                finish_pending_whitespace_before_break(
+                    out,
+                    &mut pending_ws,
+                    &mut cap_next_whitespace,
+                    trim,
+                    collapse,
+                    &mut changes,
+                    &mut stats,
+                );
                 out.push('\n');
                 record_change!(changes, stats, spaces_normalized);
                 emitted_anything = true;
@@ -957,14 +953,13 @@ impl TextCleaner {
                             record_change!(changes, stats, other_normalized);
                         }
                         HORIZONTAL_ELLIPSIS | MIDLINE_HORIZONTAL_ELLIPSIS => {
-                            if pending_ws > 0 {
-                                if drop_leading_whitespace && !emitted_anything {
-                                    pending_ws = 0;
-                                } else {
-                                    flush_pending_whitespace(out, pending_ws, collapse);
-                                    pending_ws = 0;
-                                }
-                            }
+                            flush_or_drop_pending_whitespace(
+                                out,
+                                &mut pending_ws,
+                                collapse,
+                                drop_leading_whitespace,
+                                emitted_anything,
+                            );
                             out.push_str("...");
                             emitted_anything = true;
                             drop_leading_whitespace = false;
@@ -1001,14 +996,13 @@ impl TextCleaner {
             if self.options.keyboard_only {
                 let is_emoji_cluster = ensure_emoji_cluster(&mut emoji_classifier);
                 if is_emoji_cluster && matches!(self.options.emoji_policy, EmojiPolicy::Keep) {
-                    if pending_ws > 0 {
-                        if drop_leading_whitespace && !emitted_anything {
-                            pending_ws = 0;
-                        } else {
-                            flush_pending_whitespace(out, pending_ws, collapse);
-                            pending_ws = 0;
-                        }
-                    }
+                    flush_or_drop_pending_whitespace(
+                        out,
+                        &mut pending_ws,
+                        collapse,
+                        drop_leading_whitespace,
+                        emitted_anything,
+                    );
                     out.push_str(&cluster_buffer);
                     emitted_anything = true;
                     drop_leading_whitespace = false;
@@ -1038,14 +1032,13 @@ impl TextCleaner {
                     }
                     cluster_buffer = rewrite.text;
 
-                    if pending_ws > 0 {
-                        if drop_leading_whitespace && !emitted_anything {
-                            pending_ws = 0;
-                        } else {
-                            flush_pending_whitespace(out, pending_ws, collapse);
-                            pending_ws = 0;
-                        }
-                    }
+                    flush_or_drop_pending_whitespace(
+                        out,
+                        &mut pending_ws,
+                        collapse,
+                        drop_leading_whitespace,
+                        emitted_anything,
+                    );
                     out.push_str(&cluster_buffer);
                     emitted_anything = true;
                     drop_leading_whitespace = false;
@@ -1085,14 +1078,13 @@ impl TextCleaner {
                     }
                 }
             } else {
-                if pending_ws > 0 {
-                    if drop_leading_whitespace && !emitted_anything {
-                        pending_ws = 0;
-                    } else {
-                        flush_pending_whitespace(out, pending_ws, collapse);
-                        pending_ws = 0;
-                    }
-                }
+                flush_or_drop_pending_whitespace(
+                    out,
+                    &mut pending_ws,
+                    collapse,
+                    drop_leading_whitespace,
+                    emitted_anything,
+                );
                 out.push_str(&cluster_buffer);
                 emitted_anything = true;
                 drop_leading_whitespace = false;
@@ -1103,12 +1095,14 @@ impl TextCleaner {
             if pending_ws > 0 {
                 record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
             }
-        } else if pending_ws > 0 {
-            if drop_leading_whitespace && !emitted_anything {
-                // drop leading whitespace that only existed due to removed clusters
-            } else {
-                flush_pending_whitespace(out, pending_ws, collapse);
-            }
+        } else {
+            flush_or_drop_pending_whitespace(
+                out,
+                &mut pending_ws,
+                collapse,
+                drop_leading_whitespace,
+                emitted_anything,
+            );
         }
 
         match self.options.normalize_line_endings {
@@ -1380,6 +1374,43 @@ fn flush_pending_whitespace(out: &mut String, pending: usize, collapse: bool) {
             out.push(' ');
         }
     }
+}
+
+fn flush_or_drop_pending_whitespace(
+    out: &mut String,
+    pending: &mut usize,
+    collapse: bool,
+    drop_leading: bool,
+    emitted_anything: bool,
+) {
+    if *pending == 0 {
+        return;
+    }
+    if !(drop_leading && !emitted_anything) {
+        flush_pending_whitespace(out, *pending, collapse);
+    }
+    *pending = 0;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_pending_whitespace_before_break(
+    out: &mut String,
+    pending: &mut usize,
+    cap_next: &mut bool,
+    trim: bool,
+    collapse: bool,
+    changes: &mut u64,
+    stats: &mut CleaningStats,
+) {
+    if trim {
+        if *pending > 0 {
+            record_change!(*changes, stats, trailing_whitespace_removed, *pending);
+        }
+    } else {
+        flush_pending_whitespace(out, *pending, collapse);
+    }
+    *pending = 0;
+    *cap_next = false;
 }
 
 fn is_disallowed_control(c: char) -> bool {
