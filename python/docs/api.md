@@ -97,12 +97,17 @@ Presets:
 - `Options.aggressive_preset()`
 - `Options.code_safe_preset()`: preserves source/docs text semantics by disabling quote/dash/ellipsis rewrites and turning off keyboard-only dropping.
 
+`repr(options)` uses the same lowercase Python-facing names accepted by the
+constructor (for example `emoji_policy='keep'`).
+
 ### `Cleaner`
 
 Reusable cleaner instance.
 
 - `Cleaner(options: Options | None = None)`
 - `clean(text: str) -> CleaningResult`
+
+`repr(cleaner)` reports `keyboard_only` and the lowercase emoji policy.
 
 Use `Cleaner` when you need counters/stats, not just cleaned text.
 
@@ -113,6 +118,9 @@ Returned by `Cleaner.clean`.
 - `text: str`
 - `changes_made: int`
 - `stats: dict[str, int]`
+
+`CleaningResult` compares by value, converts to its cleaned text with `str()`,
+and is truthy when `changes_made > 0`.
 
 Stats keys:
 

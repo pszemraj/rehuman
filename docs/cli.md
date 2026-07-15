@@ -62,6 +62,9 @@ rehuman --stream < huge.log > huge.clean.log
 | `--stats-json`                   | JSON summary to stderr                                                                            |
 | `--exit-code`                    | Exit with status `1` if changes were made                                                         |
 
+When built with the `security` feature, both stats formats include the
+`bidi_controls_removed` counter.
+
 Additional boolean overrides accepted by both tools:
 
 - `--remove-hidden`
