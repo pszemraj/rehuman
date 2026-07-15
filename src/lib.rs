@@ -1342,12 +1342,14 @@ fn finish_pending_whitespace_before_break(
     if trim {
         if *pending > 0 {
             record_change!(*changes, stats, trailing_whitespace_removed, *pending);
+            *pending = 0;
+            *cap_next = false;
         }
     } else {
         flush_pending_whitespace(out, *pending, collapse);
+        *pending = 0;
+        *cap_next = false;
     }
-    *pending = 0;
-    *cap_next = false;
 }
 
 fn is_disallowed_control(c: char) -> bool {
