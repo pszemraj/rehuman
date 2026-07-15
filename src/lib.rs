@@ -1431,14 +1431,12 @@ fn is_fast_path_safe_ascii_byte(b: u8) -> bool {
 struct LineEndingCounts {
     crlf: u64,
     cr: u64,
-    nel: u64,
-    ls: u64,
-    ps: u64,
+    unicode: u64,
 }
 
 impl LineEndingCounts {
     fn total(&self) -> u64 {
-        self.crlf + self.cr + self.nel + self.ls + self.ps
+        self.crlf + self.cr + self.unicode
     }
 }
 
@@ -1458,15 +1456,9 @@ fn to_lf(s: &str) -> (String, LineEndingCounts) {
                 counts.cr = counts.cr.saturating_add(1);
             }
             out.push('\n');
-        } else if c == '\u{0085}' {
+        } else if matches!(c, '\u{0085}' | '\u{2028}' | '\u{2029}') {
             out.push('\n');
-            counts.nel = counts.nel.saturating_add(1);
-        } else if c == '\u{2028}' {
-            out.push('\n');
-            counts.ls = counts.ls.saturating_add(1);
-        } else if c == '\u{2029}' {
-            out.push('\n');
-            counts.ps = counts.ps.saturating_add(1);
+            counts.unicode = counts.unicode.saturating_add(1);
         } else {
             out.push(c);
         }
@@ -1475,25 +1467,16 @@ fn to_lf(s: &str) -> (String, LineEndingCounts) {
 }
 
 fn restamp_line_endings_mut(style: LineEndingStyle, text: &mut String) -> u64 {
-    match style {
-        LineEndingStyle::Lf => 0,
-        LineEndingStyle::Crlf => {
-            let lf_count = text.as_bytes().iter().filter(|&&b| b == b'\n').count() as u64;
-            if lf_count > 0 {
-                let restamped = text.replace('\n', "\r\n");
-                *text = restamped;
-            }
-            lf_count
-        }
-        LineEndingStyle::Cr => {
-            let lf_count = text.as_bytes().iter().filter(|&&b| b == b'\n').count() as u64;
-            if lf_count > 0 {
-                let restamped = text.replace('\n', "\r");
-                *text = restamped;
-            }
-            lf_count
-        }
+    let replacement = match style {
+        LineEndingStyle::Lf => return 0,
+        LineEndingStyle::Crlf => "\r\n",
+        LineEndingStyle::Cr => "\r",
+    };
+    let lf_count = text.as_bytes().iter().filter(|&&b| b == b'\n').count() as u64;
+    if lf_count > 0 {
+        *text = text.replace('\n', replacement);
     }
+    lf_count
 }
 
 fn map_dash(c: char) -> Option<char> {
