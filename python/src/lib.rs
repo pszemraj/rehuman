@@ -83,25 +83,17 @@ fn parse_line_endings(value: Option<&str>) -> PyResult<Option<LineEndingStyle>> 
 
 fn stats_to_dict<'py>(py: Python<'py>, stats: &CleaningStats) -> PyResult<Bound<'py, PyDict>> {
     let dict = PyDict::new(py);
-    dict.set_item("hidden_chars_removed", stats.hidden_chars_removed)?;
-    dict.set_item(
-        "trailing_whitespace_removed",
-        stats.trailing_whitespace_removed,
-    )?;
-    dict.set_item("spaces_normalized", stats.spaces_normalized)?;
-    dict.set_item("dashes_normalized", stats.dashes_normalized)?;
-    dict.set_item("quotes_normalized", stats.quotes_normalized)?;
-    dict.set_item("other_normalized", stats.other_normalized)?;
-    dict.set_item("control_chars_removed", stats.control_chars_removed)?;
-    dict.set_item("line_endings_normalized", stats.line_endings_normalized)?;
-    dict.set_item("non_keyboard_removed", stats.non_keyboard_removed)?;
-    dict.set_item(
-        "non_keyboard_transliterated",
-        stats.non_keyboard_transliterated,
-    )?;
-    dict.set_item("emojis_dropped", stats.emojis_dropped)?;
-    #[cfg(feature = "security")]
-    dict.set_item("bidi_controls_removed", stats.bidi_controls_removed)?;
+    let serialized = serde_json::to_value(stats)
+        .map_err(|error| PyValueError::new_err(format!("failed to serialize stats: {error}")))?;
+    let fields = serialized
+        .as_object()
+        .ok_or_else(|| PyValueError::new_err("CleaningStats did not serialize as an object"))?;
+    for (name, value) in fields {
+        let count = value.as_u64().ok_or_else(|| {
+            PyValueError::new_err(format!("stats field {name:?} did not serialize as u64"))
+        })?;
+        dict.set_item(name, count)?;
+    }
     Ok(dict)
 }
 

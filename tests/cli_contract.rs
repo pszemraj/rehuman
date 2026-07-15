@@ -515,6 +515,28 @@ fn stats_json_contract_is_consistent_between_bins() {
     assert_eq!(rehuman_json, ishuman_json);
 }
 
+#[cfg(feature = "security")]
+#[test]
+fn human_stats_include_security_counters() {
+    let output = run_bin(
+        "rehuman",
+        &[
+            "--stats",
+            "--strip-bidi-controls",
+            "true",
+            "--keyboard-only",
+            "false",
+        ],
+        Some("\u{202e}ab\u{202c}c"),
+    );
+    assert!(output.status.success(), "{}", stderr_text(&output));
+    assert!(
+        stderr_text(&output).contains("bidi_controls_removed: 2"),
+        "{}",
+        stderr_text(&output)
+    );
+}
+
 #[test]
 fn code_safe_preset_preserves_diagram_glyphs() {
     let diagram = "rehuman/\n├── src/\n│   └── lib.rs\n";

@@ -663,28 +663,15 @@ pub fn read_input(input_path: Option<&Path>, max_bytes: usize) -> Result<String>
 
 /// Emit human-readable stats to stderr.
 pub fn write_stats(result: &CleaningResult<'_>) {
-    let stats = &result.stats;
     eprintln!("changes_made: {}", result.changes_made);
-    eprintln!("  hidden_chars_removed: {}", stats.hidden_chars_removed);
-    eprintln!(
-        "  trailing_whitespace_removed: {}",
-        stats.trailing_whitespace_removed
-    );
-    eprintln!("  spaces_normalized: {}", stats.spaces_normalized);
-    eprintln!("  dashes_normalized: {}", stats.dashes_normalized);
-    eprintln!("  quotes_normalized: {}", stats.quotes_normalized);
-    eprintln!("  other_normalized: {}", stats.other_normalized);
-    eprintln!("  control_chars_removed: {}", stats.control_chars_removed);
-    eprintln!(
-        "  line_endings_normalized: {}",
-        stats.line_endings_normalized
-    );
-    eprintln!("  non_keyboard_removed: {}", stats.non_keyboard_removed);
-    eprintln!(
-        "  non_keyboard_transliterated: {}",
-        stats.non_keyboard_transliterated
-    );
-    eprintln!("  emojis_dropped: {}", stats.emojis_dropped);
+    let serialized = serde_json::to_value(&result.stats)
+        .expect("serializing CleaningStats to JSON values cannot fail");
+    let fields = serialized
+        .as_object()
+        .expect("CleaningStats must serialize as an object");
+    for (name, value) in fields {
+        eprintln!("  {name}: {value}");
+    }
 }
 
 /// Parse a flexible boolean flag value.
