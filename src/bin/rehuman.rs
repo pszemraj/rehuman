@@ -66,10 +66,6 @@ fn main() -> Result<()> {
         bail!("no input provided; pass a file path or pipe data into stdin");
     }
 
-    if cli.inplace && cli.input.is_none() {
-        bail!("'--inplace' requires an explicit file path input");
-    }
-
     let cleaner = TextCleaner::new(options.clone());
 
     let (aggregate_stats, changes_made) = if cli.inplace {
@@ -310,7 +306,12 @@ struct Cli {
     stream: bool,
 
     /// Apply the transformation directly to the input file.
-    #[arg(long = "inplace", action = ArgAction::SetTrue, conflicts_with = "stream")]
+    #[arg(
+        long = "inplace",
+        action = ArgAction::SetTrue,
+        conflicts_with = "stream",
+        requires = "input"
+    )]
     inplace: bool,
 }
 
@@ -323,6 +324,12 @@ mod tests {
     fn clap_rejects_stream_and_inplace_together() {
         let parsed = Cli::try_parse_from(["rehuman", "--stream", "--inplace", "input.txt"]);
         assert!(parsed.is_err(), "expected clap conflict error");
+    }
+
+    #[test]
+    fn clap_rejects_inplace_without_input() {
+        let parsed = Cli::try_parse_from(["rehuman", "--inplace"]);
+        assert!(parsed.is_err(), "expected clap dependency error");
     }
 
     #[test]

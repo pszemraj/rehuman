@@ -139,6 +139,17 @@ fn rehuman_rejects_stream_and_inplace_combination() {
 }
 
 #[test]
+fn rehuman_rejects_inplace_without_path_at_parse_time() {
+    let output = run_bin("rehuman", &["--inplace"], Some("stdin is not a path"));
+    assert_eq!(output.status.code(), Some(2), "{}", stderr_text(&output));
+    assert!(
+        stderr_text(&output).contains("required arguments were not provided"),
+        "{}",
+        stderr_text(&output)
+    );
+}
+
+#[test]
 fn rehuman_rejects_print_config_with_processing_flags() {
     let output = run_bin("rehuman", &["--print-config", "--stats"], None);
     assert!(!output.status.success());
