@@ -810,7 +810,6 @@ impl TextCleaner {
         let collapse = self.options.collapse_whitespace;
 
         let mut emoji_classifier: Option<EmojiClassifier> = None;
-        let default_ignorables = CodePointSetData::new::<props::DefaultIgnorableCodePoint>();
         let mut cluster_buffer = String::new();
         #[cfg(feature = "security")]
         let bidi_controls: Option<CodePointSetDataBorrowed<'static>> =
@@ -907,7 +906,7 @@ impl TextCleaner {
                     }
                 }
 
-                if self.options.remove_hidden && default_ignorables.contains(c) {
+                if self.options.remove_hidden && is_hidden_char(c) {
                     let keep_hidden = (self.options.preserve_joiners && is_joiner(c))
                         || ((!self.options.keyboard_only
                             || matches!(self.options.emoji_policy, EmojiPolicy::Keep))
