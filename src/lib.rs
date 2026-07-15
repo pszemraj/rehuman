@@ -1071,15 +1071,46 @@ impl TextCleaner {
         match self.options.unicode_normalization {
             UnicodeNormalizationMode::None => Ok(Cow::Borrowed(text)),
             #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFD => Ok(Cow::Owned(text.nfd().collect())),
-            #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFC => Ok(Cow::Owned(text.nfc().collect())),
-            #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFKD => Ok(Cow::Owned(text.nfkd().collect())),
-            #[cfg(feature = "unorm")]
-            UnicodeNormalizationMode::NFKC => Ok(Cow::Owned(text.nfkc().collect())),
+            mode => {
+                let mut normalized = String::with_capacity(text.len());
+                let mut segment_start = 0;
+
+                for (index, c) in text.char_indices() {
+                    if self.has_source_sensitive_mapping(c) {
+                        append_normalized_segment(
+                            mode,
+                            &text[segment_start..index],
+                            &mut normalized,
+                        );
+                        normalized.push(c);
+                        segment_start = index + c.len_utf8();
+                    }
+                }
+                append_normalized_segment(mode, &text[segment_start..], &mut normalized);
+                Ok(Cow::Owned(normalized))
+            }
             #[cfg(not(feature = "unorm"))]
             mode => Err(CleaningError::NormalizationUnavailable { requested: mode }),
+        }
+    }
+
+    /// Return whether the original code point must survive whole-input
+    /// normalization so the later keyboard rewrite can apply its explicit
+    /// semantic mapping. Normalizing these characters first can erase meaning
+    /// (`≠` -> `=` + overlay) or make source unit signs indistinguishable from
+    /// Greek letters (`Ω`/`µ` -> `Ω`/`μ`).
+    #[cfg(feature = "unorm")]
+    fn has_source_sensitive_mapping(&self, c: char) -> bool {
+        if !self.options.keyboard_only || is_keyboard_allowed(c, self.options.extended_keyboard) {
+            return false;
+        }
+
+        match self.options.non_ascii_policy {
+            NonAsciiPolicy::Drop => false,
+            NonAsciiPolicy::Fold => compat_override(c).is_some(),
+            NonAsciiPolicy::Transliterate => {
+                compat_override(c).is_some() || explicit_transliteration(c).is_some()
+            }
         }
     }
 
@@ -1096,6 +1127,17 @@ impl TextCleaner {
             // keyboard_only strips ASCII control chars (except \n \r \t) regardless
             // of remove_control_chars; the fast path must not silently keep them.
             && (!self.options.keyboard_only || text.bytes().all(is_fast_path_safe_ascii_byte))
+    }
+}
+
+#[cfg(feature = "unorm")]
+fn append_normalized_segment(mode: UnicodeNormalizationMode, segment: &str, out: &mut String) {
+    match mode {
+        UnicodeNormalizationMode::None => out.push_str(segment),
+        UnicodeNormalizationMode::NFD => out.extend(segment.nfd()),
+        UnicodeNormalizationMode::NFC => out.extend(segment.nfc()),
+        UnicodeNormalizationMode::NFKD => out.extend(segment.nfkd()),
+        UnicodeNormalizationMode::NFKC => out.extend(segment.nfkc()),
     }
 }
 
@@ -1533,10 +1575,7 @@ fn append_transliterated_non_ascii(c: char, out: &mut String, extended_keyboard:
     // Curated, high-quality ASCII first: Latin letters that must be spelled out
     // (ß -> ss), the symbol glyphs LLMs emit constantly (-> for arrows, etc.),
     // and Greek letters used as math symbols (lambda, Delta, ...).
-    if let Some(mapping) = transliteration_override(c)
-        .or_else(|| symbol_translit(c))
-        .or_else(|| greek_translit(c))
-    {
+    if let Some(mapping) = explicit_transliteration(c) {
         return append_mapping(Some(mapping), out, extended_keyboard);
     }
 
@@ -1555,6 +1594,12 @@ fn append_transliterated_non_ascii(c: char, out: &mut String, extended_keyboard:
         }
     }
     false
+}
+
+fn explicit_transliteration(c: char) -> Option<&'static str> {
+    transliteration_override(c)
+        .or_else(|| symbol_translit(c))
+        .or_else(|| greek_translit(c))
 }
 
 /// Apply an optional ASCII mapping, returning whether anything was emitted.
@@ -2228,6 +2273,24 @@ mod tests {
         );
         // compat_override runs before NFKD in Fold too, so ≠ stays "!=", not "=".
         assert_eq!(fold.clean("a \u{2260} b").text, "a != b");
+    }
+
+    #[cfg(feature = "unorm")]
+    #[test]
+    fn source_sensitive_mappings_precede_unicode_normalization() {
+        let nfd = TextCleaner::new(
+            CleaningOptions::builder()
+                .unicode_normalization(UnicodeNormalizationMode::NFD)
+                .non_ascii_policy(NonAsciiPolicy::Fold)
+                .build(),
+        );
+        assert_eq!(nfd.clean("a \u{2260} b").text, "a != b");
+
+        let aggressive = TextCleaner::new(CleaningOptions::aggressive());
+        let out = aggressive.clean("\u{2126} \u{00B5} \u{03A9} \u{03BC}");
+        assert_eq!(out.text, "ohm u Omega mu");
+        #[cfg(feature = "stats")]
+        assert_eq!(out.stats.non_keyboard_transliterated, 4);
     }
 
     // ---- F3: symbols transliterate instead of being deleted ----

@@ -413,6 +413,17 @@ fn default_keyboard_mode_transliterates_symbols() {
     let out = run_bin("rehuman", &[], Some("a \u{2260} b \u{2192} c \u{2022}\n"));
     assert!(out.status.success(), "{}", stderr_text(&out));
     assert_eq!(stdout_text(&out), "a != b -> c -\n");
+
+    #[cfg(feature = "unorm")]
+    {
+        let out = run_bin(
+            "rehuman",
+            &["--unicode-normalization", "nfd"],
+            Some("a \u{2260} b\n"),
+        );
+        assert!(out.status.success(), "{}", stderr_text(&out));
+        assert_eq!(stdout_text(&out), "a != b\n");
+    }
 }
 
 #[test]
