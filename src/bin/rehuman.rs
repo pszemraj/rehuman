@@ -221,23 +221,45 @@ where
     W: Write,
 {
     let mut stream = StreamCleaner::new(cleaner.options().clone());
-    let mut buffer = String::new();
+    // Raw bytes not yet handed to the cleaner: at most one incomplete
+    // trailing UTF-8 sequence after each iteration. Reading fixed-size
+    // chunks instead of lines keeps memory bounded even when the input's
+    // only line boundaries are U+2028/U+2029 (no LF byte for read_line).
+    let mut pending = Vec::new();
     let mut chunk_output = String::new();
 
     loop {
-        buffer.clear();
-        let bytes_read = reader
-            .read_line(&mut buffer)
-            .context("failed to read input stream")?;
-        if bytes_read == 0 {
+        let data = reader.fill_buf().context("failed to read input stream")?;
+        if data.is_empty() {
             break;
         }
-        if let Some(result) = stream.feed(&buffer, &mut chunk_output) {
+        let consumed = data.len();
+        pending.extend_from_slice(data);
+        reader.consume(consumed);
+
+        let valid_up_to = match std::str::from_utf8(&pending) {
+            Ok(text) => text.len(),
+            // The chunk ends mid-sequence: keep the tail for the next read.
+            Err(err) if err.error_len().is_none() => err.valid_up_to(),
+            Err(err) => {
+                return Err(err).context("input stream did not contain valid UTF-8");
+            }
+        };
+        if valid_up_to == 0 {
+            continue;
+        }
+        let text = std::str::from_utf8(&pending[..valid_up_to]).expect("prefix validated above");
+        if let Some(result) = stream.feed(text, &mut chunk_output) {
             writer
                 .write_all(result.text.as_bytes())
                 .context("failed to write stream chunk")?;
             chunk_output.clear();
         }
+        pending.drain(..valid_up_to);
+    }
+
+    if !pending.is_empty() {
+        bail!("input stream did not contain valid UTF-8");
     }
 
     if let Some(result) = stream.finish(&mut chunk_output) {

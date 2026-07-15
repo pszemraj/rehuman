@@ -199,7 +199,7 @@ For allocation-sensitive paths, call `TextCleaner::clean_into(input, &mut buffer
 
 ## Streaming
 
-Use `StreamCleaner` to process arbitrarily chunked input while preserving the line-oriented semantics of the batch cleaner.
+Use `StreamCleaner` to process arbitrarily chunked input while preserving the line-oriented semantics of the batch cleaner. `feed` emits cleaned output once a line boundary is buffered — a literal `\n`, or U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR (the same characters batch cleaning folds to `\n`), so input delimited only by those separators still streams line by line instead of buffering until `finish`.
 
 ```rust
 use rehuman::{CleaningOptions, StreamCleaner};

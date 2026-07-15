@@ -1178,7 +1178,13 @@ pub struct StreamSummary {
     pub changes_made: u64,
 }
 
-/// Incremental cleaner that processes text in newline-delimited chunks.
+/// Characters that end a flushable chunk: LF plus U+2028 LINE SEPARATOR and
+/// U+2029 PARAGRAPH SEPARATOR, which batch cleaning folds to `\n` under
+/// `normalize_spaces`. All three are hard grapheme-cluster breaks, so a chunk
+/// split after any of them cleans identically to the unsplit text.
+const STREAM_FLUSH_BOUNDARIES: [char; 3] = ['\n', '\u{2028}', '\u{2029}'];
+
+/// Incremental cleaner that processes text in line-delimited chunks.
 pub struct StreamCleaner {
     cleaner: TextCleaner,
     buffer: String,
@@ -1222,8 +1228,9 @@ impl StreamCleaner {
         }
     }
 
-    /// Feed one input chunk and emit cleaned output only after a newline
-    /// boundary is available.
+    /// Feed one input chunk and emit cleaned output only after a line
+    /// boundary (LF, U+2028 LINE SEPARATOR, or U+2029 PARAGRAPH SEPARATOR)
+    /// is available.
     ///
     /// # Arguments
     /// - `chunk`: Incoming text data.
@@ -1245,8 +1252,13 @@ impl StreamCleaner {
             return None;
         }
         self.buffer.push_str(chunk);
-        let last_nl = self.buffer.rfind('\n')?;
-        let flush_end = last_nl + 1;
+        let last_boundary = self.buffer.rfind(STREAM_FLUSH_BOUNDARIES)?;
+        let boundary_len = self.buffer[last_boundary..]
+            .chars()
+            .next()
+            .expect("rfind returned the start of a char")
+            .len_utf8();
+        let flush_end = last_boundary + boundary_len;
         let to_process = self.buffer[..flush_end].to_owned();
         self.buffer.drain(..flush_end);
         Some(self.process_owned_chunk(to_process, out))
@@ -2453,6 +2465,25 @@ mod tests {
         // preset requests NFKC, so it needs `unorm` to run at all.)
         #[cfg(feature = "unorm")]
         assert_eq!(humanize("x\u{2028}y").text, "x\ny");
+    }
+
+    #[test]
+    fn stream_cleaner_flushes_on_unicode_line_separators() {
+        // Since batch cleaning treats U+2028/U+2029 as line breaks, streaming
+        // must flush on them too: a stream delimited only by these separators
+        // (no LF byte anywhere) has to emit per line, not buffer to finish().
+        for sep in ['\u{2028}', '\u{2029}'] {
+            let mut stream = StreamCleaner::new(CleaningOptions::default());
+            let mut out = String::new();
+            let input = format!("alpha{sep}beta");
+            let flushed = stream
+                .feed(&input, &mut out)
+                .unwrap_or_else(|| panic!("U+{:04X} must be a flush boundary", sep as u32));
+            assert_eq!(flushed.text, "alpha\n");
+            let mut tail = String::new();
+            let finished = stream.finish(&mut tail).expect("buffered remainder");
+            assert_eq!(finished.text, "beta");
+        }
     }
 
     // ---- idempotence: clean(clean(x)) == clean(x) on representative input ----

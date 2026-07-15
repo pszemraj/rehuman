@@ -9,6 +9,18 @@ fn sample_string() -> impl Strategy<Value = String> {
     proptest::collection::vec(any::<char>(), 0..64).prop_map(|chars| chars.into_iter().collect())
 }
 
+/// Like [`sample_string`], but seeded with the stream flush boundaries
+/// (LF, CR, U+2028, U+2029) often enough that chunk splits at every kind of
+/// line boundary are actually exercised — `any::<char>()` alone essentially
+/// never emits the separators.
+fn line_boundary_string() -> impl Strategy<Value = String> {
+    let piece = prop_oneof![
+        4 => any::<char>(),
+        1 => proptest::sample::select(vec!['\n', '\r', '\u{2028}', '\u{2029}']),
+    ];
+    proptest::collection::vec(piece, 0..64).prop_map(|chars| chars.into_iter().collect())
+}
+
 fn grapheme_is_rendered_emoji(grapheme: &str) -> bool {
     let chars: Vec<char> = grapheme.chars().collect();
     let emoji = CodePointSetData::new::<props::Emoji>();
@@ -216,7 +228,7 @@ proptest! {
 
 proptest! {
     #[test]
-    fn stream_cleaner_matches_batch(input in sample_string()) {
+    fn stream_cleaner_matches_batch(input in line_boundary_string()) {
         let options = CleaningOptions::default();
         let baseline_cleaner = TextCleaner::new(options.clone());
         let baseline = baseline_cleaner.clean(&input);

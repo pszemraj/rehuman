@@ -372,6 +372,26 @@ fn stream_output_matches_buffered_output() {
 }
 
 #[test]
+fn stream_handles_unicode_line_separator_delimited_input() {
+    let dir = make_tmp_dir();
+    let input_path = dir.join("input.txt");
+    // No LF byte anywhere: lines are delimited only by U+2028/U+2029, which
+    // stream mode must treat as flush boundaries. The leading run is sized so
+    // the first 8 KiB buffered read ends one byte into the three-byte U+2028,
+    // exercising the incomplete-UTF-8 carry between reads.
+    let prefix = "a".repeat(8191);
+    let content = format!("{prefix}\u{2028}beta\u{2029}gamma");
+    write_file(&input_path, &content);
+
+    let file_arg = input_path.to_str().expect("utf8 path");
+    let streamed = run_bin("rehuman", &["--stream", file_arg], None);
+    assert!(streamed.status.success(), "{}", stderr_text(&streamed));
+    assert_eq!(stdout_text(&streamed), format!("{prefix}\nbeta\ngamma"));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn default_keyboard_mode_folds_latin_diacritics() {
     let out = run_bin("rehuman", &[], Some("Caf\u{00E9} d\u{00E9}j\u{00E0}\n"));
     assert!(out.status.success(), "{}", stderr_text(&out));

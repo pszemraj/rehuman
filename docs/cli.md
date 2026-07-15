@@ -101,7 +101,7 @@ For bulk cleanup of Markdown/code/docs files:
 
 ### Processing Modes
 
-- `--stream`: process the input line-by-line (lower memory).
+- `--stream`: process the input line-by-line (lower memory). Lines may be delimited by `\n` or by U+2028/U+2029, the separators that cleaning folds to `\n`.
 - `--inplace`: rewrite the input file atomically (uses a temp file).
 - `--stream` and `--inplace` are mutually exclusive.
 
