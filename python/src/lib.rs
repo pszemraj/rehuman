@@ -176,30 +176,9 @@ struct Options {
     inner: CleaningOptions,
 }
 
-#[pymethods]
 impl Options {
-    #[cfg(feature = "security")]
-    #[new]
-    #[pyo3(signature = (
-        remove_hidden = true,
-        remove_trailing_whitespace = true,
-        normalize_spaces = true,
-        normalize_dashes = true,
-        normalize_quotes = true,
-        normalize_other = true,
-        keyboard_only = true,
-        extended_keyboard = false,
-        keep_emoji = false,
-        non_ascii_policy = "transliterate",
-        preserve_joiners = false,
-        remove_control_chars = true,
-        collapse_whitespace = false,
-        line_endings = None,
-        unicode_normalization = "none",
-        strip_bidi_controls = false,
-    ))]
     #[allow(clippy::too_many_arguments)]
-    fn new(
+    fn from_parameters(
         remove_hidden: bool,
         remove_trailing_whitespace: bool,
         normalize_spaces: bool,
@@ -247,6 +226,68 @@ impl Options {
 
         Ok(Self { inner })
     }
+}
+
+#[pymethods]
+impl Options {
+    #[cfg(feature = "security")]
+    #[new]
+    #[pyo3(signature = (
+        remove_hidden = true,
+        remove_trailing_whitespace = true,
+        normalize_spaces = true,
+        normalize_dashes = true,
+        normalize_quotes = true,
+        normalize_other = true,
+        keyboard_only = true,
+        extended_keyboard = false,
+        keep_emoji = false,
+        non_ascii_policy = "transliterate",
+        preserve_joiners = false,
+        remove_control_chars = true,
+        collapse_whitespace = false,
+        line_endings = None,
+        unicode_normalization = "none",
+        strip_bidi_controls = false,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        remove_hidden: bool,
+        remove_trailing_whitespace: bool,
+        normalize_spaces: bool,
+        normalize_dashes: bool,
+        normalize_quotes: bool,
+        normalize_other: bool,
+        keyboard_only: bool,
+        extended_keyboard: bool,
+        keep_emoji: bool,
+        non_ascii_policy: &str,
+        preserve_joiners: bool,
+        remove_control_chars: bool,
+        collapse_whitespace: bool,
+        line_endings: Option<&str>,
+        unicode_normalization: &str,
+        strip_bidi_controls: bool,
+    ) -> PyResult<Self> {
+        Self::from_parameters(
+            remove_hidden,
+            remove_trailing_whitespace,
+            normalize_spaces,
+            normalize_dashes,
+            normalize_quotes,
+            normalize_other,
+            keyboard_only,
+            extended_keyboard,
+            keep_emoji,
+            non_ascii_policy,
+            preserve_joiners,
+            remove_control_chars,
+            collapse_whitespace,
+            line_endings,
+            unicode_normalization,
+            strip_bidi_controls,
+        )
+    }
 
     #[cfg(not(feature = "security"))]
     #[new]
@@ -285,34 +326,24 @@ impl Options {
         line_endings: Option<&str>,
         unicode_normalization: &str,
     ) -> PyResult<Self> {
-        let emoji_policy = if keep_emoji {
-            EmojiPolicy::Keep
-        } else {
-            EmojiPolicy::Drop
-        };
-        let normalize_line_endings = parse_line_endings(line_endings)?;
-        let unicode_normalization = parse_unicode_normalization(unicode_normalization)?;
-        let non_ascii_policy = parse_non_ascii_policy(non_ascii_policy)?;
-
-        let inner = CleaningOptions::builder()
-            .remove_hidden(remove_hidden)
-            .remove_trailing_whitespace(remove_trailing_whitespace)
-            .normalize_spaces(normalize_spaces)
-            .normalize_dashes(normalize_dashes)
-            .normalize_quotes(normalize_quotes)
-            .normalize_other(normalize_other)
-            .keyboard_only(keyboard_only)
-            .extended_keyboard(extended_keyboard)
-            .emoji_policy(emoji_policy)
-            .non_ascii_policy(non_ascii_policy)
-            .preserve_joiners(preserve_joiners)
-            .remove_control_chars(remove_control_chars)
-            .collapse_whitespace(collapse_whitespace)
-            .normalize_line_endings(normalize_line_endings)
-            .unicode_normalization(unicode_normalization)
-            .build();
-
-        Ok(Self { inner })
+        Self::from_parameters(
+            remove_hidden,
+            remove_trailing_whitespace,
+            normalize_spaces,
+            normalize_dashes,
+            normalize_quotes,
+            normalize_other,
+            keyboard_only,
+            extended_keyboard,
+            keep_emoji,
+            non_ascii_policy,
+            preserve_joiners,
+            remove_control_chars,
+            collapse_whitespace,
+            line_endings,
+            unicode_normalization,
+            false,
+        )
     }
 
     #[staticmethod]
