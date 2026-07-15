@@ -32,11 +32,17 @@ fn general_category(c: char) -> GeneralCategory {
 /// for deunicode-based transliteration of letters: diacritics, ligatures,
 /// phonetic/IPA extensions, and every Latin Extended block — without
 /// maintaining a hardcoded block list.
+///
+/// # Returns
+/// `true` when `c` has the Unicode `Latin` script property.
 pub(crate) fn is_latin_script(c: char) -> bool {
     script(c) == Script::Latin
 }
 
 /// Unicode control characters (General_Category=Control).
+///
+/// # Returns
+/// `true` when `c` has Unicode general category `Control`.
 pub(crate) fn is_control_char(c: char) -> bool {
     general_category(c) == GeneralCategory::Control
 }
@@ -47,6 +53,10 @@ pub(crate) fn is_control_char(c: char) -> bool {
 /// fallback surface — it deliberately excludes letters, marks, and digits of
 /// concrete scripts (CJK, Cyrillic, Braille, ...), which keep dropping rather
 /// than being romanized.
+///
+/// # Returns
+/// `true` when `c` is a Common/Inherited character in one of the supported
+/// symbol, punctuation, separator, number, or modifier-letter categories.
 pub(crate) fn is_common_symbol_or_punctuation(c: char) -> bool {
     matches!(script(c), Script::Common | Script::Inherited)
         && matches!(

@@ -699,6 +699,10 @@ pub fn read_input(input_path: Option<&Path>, max_bytes: usize) -> Result<String>
 }
 
 /// Emit human-readable stats to stderr.
+///
+/// # Panics
+/// Panics if [`CleaningStats`] does not serialize as a JSON object or if
+/// writing to stderr fails.
 pub fn write_stats(result: &CleaningResult<'_>) {
     eprintln!("changes_made: {}", result.changes_made);
     let serialized = serde_json::to_value(&result.stats)
