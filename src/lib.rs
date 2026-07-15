@@ -706,23 +706,14 @@ impl TextCleaner {
         text: &'a str,
         has_prior_output: bool,
     ) -> Result<CleaningResult<'a>, CleaningError> {
-        if text.is_empty() {
+        let Some(working) = self.prepare_input(text)? else {
             return Ok(CleaningResult {
                 text: Cow::Borrowed(text),
                 changes_made: 0,
                 stats: CleaningStats::default(),
             });
-        }
+        };
 
-        if self.can_use_ascii_fast_path(text) {
-            return Ok(CleaningResult {
-                text: Cow::Borrowed(text),
-                changes_made: 0,
-                stats: CleaningStats::default(),
-            });
-        }
-
-        let working = self.normalize_input(text)?;
         let mut buffer = String::with_capacity(working.len());
         let (changes, stats) = self.clean_into_internal(working, &mut buffer, has_prior_output);
         Ok(CleaningResult {
@@ -753,24 +744,15 @@ impl TextCleaner {
     ) -> Result<CleaningResult<'output>, CleaningError> {
         out.clear();
 
-        if text.is_empty() {
-            return Ok(CleaningResult {
-                text: Cow::Borrowed(out.as_str()),
-                changes_made: 0,
-                stats: CleaningStats::default(),
-            });
-        }
-
-        if self.can_use_ascii_fast_path(text) {
+        let Some(working) = self.prepare_input(text)? else {
             out.push_str(text);
             return Ok(CleaningResult {
                 text: Cow::Borrowed(out.as_str()),
                 changes_made: 0,
                 stats: CleaningStats::default(),
             });
-        }
+        };
 
-        let working = self.normalize_input(text)?;
         let (changes, stats) = self.clean_into_internal(working, out, has_prior_output);
         Ok(CleaningResult {
             text: Cow::Borrowed(out.as_str()),
@@ -1128,6 +1110,14 @@ impl TextCleaner {
         }
 
         (changes, stats)
+    }
+
+    fn prepare_input<'a>(&self, text: &'a str) -> Result<Option<Cow<'a, str>>, CleaningError> {
+        if text.is_empty() || self.can_use_ascii_fast_path(text) {
+            Ok(None)
+        } else {
+            self.normalize_input(text).map(Some)
+        }
     }
 
     fn normalize_input<'a>(&self, text: &'a str) -> Result<Cow<'a, str>, CleaningError> {
@@ -2402,6 +2392,13 @@ mod tests {
         });
         let out = c.clean("a\u{0001}b\u{007F}c");
         assert_eq!(out.text, "abc");
+    }
+
+    #[test]
+    fn ascii_fast_path_borrows_input() {
+        let cleaner = TextCleaner::new(CleaningOptions::minimal());
+        let output = cleaner.clean("plain ASCII");
+        assert!(matches!(output.text, Cow::Borrowed("plain ASCII")));
     }
 
     // ---- F4: a dropped emoji is billed once, not also as hidden removals ----
