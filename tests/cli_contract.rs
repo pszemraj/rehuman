@@ -522,8 +522,9 @@ fn human_stats_include_security_counters() {
         Some("\u{202e}ab\u{202c}c"),
     );
     assert!(output.status.success(), "{}", stderr_text(&output));
+    let expected = if cfg!(feature = "stats") { 2 } else { 0 };
     assert!(
-        stderr_text(&output).contains("bidi_controls_removed: 2"),
+        stderr_text(&output).contains(&format!("bidi_controls_removed: {expected}")),
         "{}",
         stderr_text(&output)
     );
