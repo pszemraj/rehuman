@@ -484,8 +484,9 @@ impl Cleaner {
     fn __repr__(&self) -> String {
         let options = self.inner.options();
         format!(
-            "Cleaner(keyboard_only={}, emoji_policy={:?})",
-            options.keyboard_only, options.emoji_policy
+            "Cleaner(keyboard_only={}, emoji_policy='{}')",
+            options.keyboard_only,
+            format_emoji_policy(options.emoji_policy)
         )
     }
 }

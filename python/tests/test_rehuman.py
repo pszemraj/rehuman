@@ -218,9 +218,12 @@ def test_options_repr_and_result_equality_are_value_based() -> None:
     assert "unicode_normalization='nfkc'" in options_repr
 
     cleaner = rehuman.Cleaner(options)
+    assert repr(cleaner) == "Cleaner(keyboard_only=true, emoji_policy='keep')"
     left = cleaner.clean("e\u0301 👍")
     right = cleaner.clean("e\u0301 👍")
     assert left == right
+    assert str(left) == left.text
+    assert repr(left).startswith("CleaningResult(changes_made=")
 
 
 def test_code_safe_preset_removes_hidden_and_control_chars() -> None:
