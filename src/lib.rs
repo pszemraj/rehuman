@@ -2202,24 +2202,58 @@ mod tests {
     }
 
     #[test]
-    fn code_safe_preset_fields_match_cli_contract() {
-        let options = CleaningOptions::code_safe();
-        assert!(options.remove_hidden);
-        assert!(options.remove_trailing_whitespace);
-        assert!(options.normalize_spaces);
-        assert!(!options.normalize_dashes);
-        assert!(!options.normalize_quotes);
-        assert!(!options.normalize_other);
-        assert!(!options.keyboard_only);
-        assert_eq!(options.emoji_policy, EmojiPolicy::Keep);
-        assert_eq!(options.non_ascii_policy, NonAsciiPolicy::Transliterate);
-        assert!(options.preserve_joiners);
-        assert!(options.remove_control_chars);
-        assert!(!options.collapse_whitespace);
-        assert_eq!(options.normalize_line_endings, None);
+    fn preset_fields_match_contract() {
         assert_eq!(
-            options.unicode_normalization,
-            UnicodeNormalizationMode::None
+            CleaningOptions::minimal(),
+            CleaningOptions {
+                remove_trailing_whitespace: false,
+                normalize_spaces: false,
+                normalize_dashes: false,
+                normalize_quotes: false,
+                normalize_other: false,
+                keyboard_only: false,
+                remove_control_chars: false,
+                ..CleaningOptions::default()
+            }
+        );
+        assert_eq!(
+            CleaningOptions::balanced(),
+            CleaningOptions {
+                keyboard_only: false,
+                unicode_normalization: UnicodeNormalizationMode::NFC,
+                ..CleaningOptions::default()
+            }
+        );
+        assert_eq!(
+            CleaningOptions::humanize(),
+            CleaningOptions {
+                keyboard_only: false,
+                collapse_whitespace: true,
+                unicode_normalization: UnicodeNormalizationMode::NFKC,
+                ..CleaningOptions::default()
+            }
+        );
+        assert_eq!(
+            CleaningOptions::aggressive(),
+            CleaningOptions {
+                collapse_whitespace: true,
+                normalize_line_endings: Some(LineEndingStyle::Lf),
+                unicode_normalization: UnicodeNormalizationMode::NFKC,
+                strip_bidi_controls: true,
+                ..CleaningOptions::default()
+            }
+        );
+        assert_eq!(
+            CleaningOptions::code_safe(),
+            CleaningOptions {
+                normalize_dashes: false,
+                normalize_quotes: false,
+                normalize_other: false,
+                keyboard_only: false,
+                emoji_policy: EmojiPolicy::Keep,
+                preserve_joiners: true,
+                ..CleaningOptions::default()
+            }
         );
     }
 
