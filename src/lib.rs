@@ -1323,7 +1323,7 @@ fn flush_or_drop_pending_whitespace(
     if *pending == 0 {
         return;
     }
-    if !(drop_leading && !emitted_anything) {
+    if !drop_leading || emitted_anything {
         flush_pending_whitespace(out, *pending, collapse);
     }
     *pending = 0;
