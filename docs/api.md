@@ -53,15 +53,25 @@ most specific rule that produces output:
 2. **NFKD compatibility fold** (both modes): `½` -> `1/2`, `™` -> `TM`,
    fullwidth forms, Roman numerals, and Latin diacritics (`é` -> `e`).
 3. **Curated symbol table** (`Transliterate` only): common arrows, math and
-   relational operators, bullets, geometric shapes, check marks, and letterlike
-   marks (`→` -> `->`, `⇒` -> `==>`, `≤` -> `<=`, `•` -> `-`, `✓` -> `[x]`,
-   `©` -> `(c)`, `®` -> `(r)`).
-4. **Long-tail symbol fallback** (`Transliterate` only): remaining characters
+   relational operators, bullets, geometric shapes, check marks, letterlike
+   marks, and Latin-1 punctuation (`→` -> `->`, `⇒` -> `==>`, `≤` -> `<=`,
+   `•` -> `-`, `✓` -> `[x]`, `©` -> `(c)`, `®` -> `(r)`, `£` -> `GBP`,
+   `§` -> `S`). A handful of meaning-bearing emoji marks are included even
+   though they are Emoji-classified, because they carry pass/fail/alert
+   semantics: `✅` -> `[x]`, `❌` -> `[ ]`, `⚠` -> `[!]`, `❗` -> `!`,
+   `❓` -> `?`, `⭐` -> `*`.
+4. **Greek letter names** (`Transliterate` only): Greek letters spell out to
+   their English names (`λ` -> `lambda`, `Δ` -> `Delta`, `π` -> `pi`) because
+   LLM output overwhelmingly uses them as math/stats symbols, where deletion
+   destroys meaning. This is the one exception to the scripts rule below; the
+   cost is that Greek-language prose becomes concatenated letter names.
+5. **Long-tail symbol fallback** (`Transliterate` only): remaining characters
    from symbol/punctuation blocks (box drawing, number forms, currency signs)
-   transliterate via `deunicode` (`─│┌` -> `-|+`).
-5. Anything still unmapped is dropped.
+   and phonetic Latin (IPA) transliterate via `deunicode` (`─│┌` -> `-|+`,
+   `ə` -> `@`).
+6. Anything still unmapped is dropped.
 
-Letter scripts (CJK, Cyrillic, Greek, Arabic, ...) are never romanized: `世界`
+Other letter scripts (CJK, Cyrillic, Arabic, ...) are never romanized: `世界`
 is dropped, not turned into `"Shi Jie"`. Pictographic emoji are likewise
 dropped per `emoji_policy`, never spelled out by name.
 

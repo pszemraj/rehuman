@@ -1567,8 +1567,12 @@ fn append_folded_non_ascii(c: char, out: &mut String, _: bool) -> bool {
 
 fn append_transliterated_non_ascii(c: char, out: &mut String, extended_keyboard: bool) -> bool {
     // Curated, high-quality ASCII first: Latin letters that must be spelled out
-    // (ß -> ss) and the symbol glyphs LLMs emit constantly (-> for arrows, etc.).
-    if let Some(mapping) = transliteration_override(c).or_else(|| symbol_translit(c)) {
+    // (ß -> ss), the symbol glyphs LLMs emit constantly (-> for arrows, etc.),
+    // and Greek letters used as math symbols (lambda, Delta, ...).
+    if let Some(mapping) = transliteration_override(c)
+        .or_else(|| symbol_translit(c))
+        .or_else(|| greek_translit(c))
+    {
         return append_mapping(Some(mapping), out, extended_keyboard);
     }
 
@@ -1609,6 +1613,10 @@ fn is_latin_transliteration_candidate(c: char) -> bool {
     matches!(
         c as u32,
         0x00C0..=0x024F
+            | 0x0250..=0x02AF // IPA Extensions (SAMPA-style ASCII via deunicode)
+            | 0x02B0..=0x02FF // Spacing Modifier Letters (phonetics, okina, stress marks)
+            | 0x1D00..=0x1D7F // Phonetic Extensions
+            | 0x1D80..=0x1DBF // Phonetic Extensions Supplement
             | 0x1E00..=0x1EFF
             | 0x2C60..=0x2C7F
             | 0xA720..=0xA7FF
@@ -1616,6 +1624,101 @@ fn is_latin_transliteration_candidate(c: char) -> bool {
             | 0x10780..=0x107BF
             | 0x1DF00..=0x1DFFF
     )
+}
+
+/// Greek letters spell out to their English names under `Transliterate`. Greek
+/// is the one deliberate exception to the "letter scripts drop" rule: LLM
+/// output overwhelmingly uses Greek letters as math/stats symbols ("lambda =
+/// 0.5", "Delta x"), where silent deletion destroys meaning. The cost is that
+/// actual Greek-language prose becomes concatenated letter names; that trade
+/// was made consciously. Other scripts (CJK, Cyrillic, Arabic, ...) still drop.
+fn greek_translit(c: char) -> Option<&'static str> {
+    Some(match c {
+        // Uppercase
+        '\u{0391}' => "Alpha",
+        '\u{0392}' => "Beta",
+        '\u{0393}' => "Gamma",
+        '\u{0394}' => "Delta",
+        '\u{0395}' => "Epsilon",
+        '\u{0396}' => "Zeta",
+        '\u{0397}' => "Eta",
+        '\u{0398}' => "Theta",
+        '\u{0399}' => "Iota",
+        '\u{039A}' => "Kappa",
+        '\u{039B}' => "Lambda",
+        '\u{039C}' => "Mu",
+        '\u{039D}' => "Nu",
+        '\u{039E}' => "Xi",
+        '\u{039F}' => "Omicron",
+        '\u{03A0}' => "Pi",
+        '\u{03A1}' => "Rho",
+        '\u{03A3}' => "Sigma",
+        '\u{03A4}' => "Tau",
+        '\u{03A5}' => "Upsilon",
+        '\u{03A6}' => "Phi",
+        '\u{03A7}' => "Chi",
+        '\u{03A8}' => "Psi",
+        '\u{03A9}' => "Omega",
+        // Lowercase
+        '\u{03B1}' => "alpha",
+        '\u{03B2}' => "beta",
+        '\u{03B3}' => "gamma",
+        '\u{03B4}' => "delta",
+        '\u{03B5}' => "epsilon",
+        '\u{03B6}' => "zeta",
+        '\u{03B7}' => "eta",
+        '\u{03B8}' => "theta",
+        '\u{03B9}' => "iota",
+        '\u{03BA}' => "kappa",
+        '\u{03BB}' => "lambda",
+        '\u{03BC}' => "mu",
+        '\u{03BD}' => "nu",
+        '\u{03BE}' => "xi",
+        '\u{03BF}' => "omicron",
+        '\u{03C0}' => "pi",
+        '\u{03C1}' => "rho",
+        '\u{03C2}' => "sigma", // final sigma
+        '\u{03C3}' => "sigma",
+        '\u{03C4}' => "tau",
+        '\u{03C5}' => "upsilon",
+        '\u{03C6}' => "phi",
+        '\u{03C7}' => "chi",
+        '\u{03C8}' => "psi",
+        '\u{03C9}' => "omega",
+        // Monotonic accented vowels (NFKD folds to base + mark, but the fold
+        // emits nothing keyboard-safe, so the original char lands here).
+        '\u{0386}' => "Alpha",
+        '\u{0388}' => "Epsilon",
+        '\u{0389}' => "Eta",
+        '\u{038A}' => "Iota",
+        '\u{038C}' => "Omicron",
+        '\u{038E}' => "Upsilon",
+        '\u{038F}' => "Omega",
+        '\u{03AA}' => "Iota",
+        '\u{03AB}' => "Upsilon",
+        '\u{03AC}' => "alpha",
+        '\u{03AD}' => "epsilon",
+        '\u{03AE}' => "eta",
+        '\u{03AF}' => "iota",
+        '\u{0390}' => "iota",
+        '\u{03B0}' => "upsilon",
+        '\u{03CA}' => "iota",
+        '\u{03CB}' => "upsilon",
+        '\u{03CC}' => "omicron",
+        '\u{03CD}' => "upsilon",
+        '\u{03CE}' => "omega",
+        // Math-style symbol variants
+        '\u{03D0}' => "beta",
+        '\u{03D1}' => "theta",
+        '\u{03D5}' => "phi",
+        '\u{03D6}' => "pi",
+        '\u{03F0}' => "kappa",
+        '\u{03F1}' => "rho",
+        '\u{03F2}' => "sigma",
+        '\u{03F4}' => "Theta",
+        '\u{03F5}' => "epsilon",
+        _ => return None,
+    })
 }
 
 /// Symbol / punctuation blocks whose members may be transliterated via
@@ -1696,9 +1799,16 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         '\u{2799}' => "->",
         '\u{279C}' => "->",
         '\u{27A4}' => "->",
-        // --- Relational / math operators with no ASCII NFKD (else dropped) ---
+        '\u{21CC}' => "<=>", // chemical equilibrium (deunicode gives bare "=")
+        '\u{21CB}' => "<=>",
+        // --- Relational / math operators with no ASCII NFKD (else dropped),
+        //     or where the deunicode fallback is wrong (noted per entry) ---
         '\u{2264}' => "<=",
         '\u{2265}' => ">=",
+        '\u{2254}' => ":=", // deunicode drops the colon ("=")
+        '\u{2255}' => "=:",
+        '\u{2218}' => "o",   // function composition (deunicode gives "*")
+        '\u{22EE}' => "...", // vertical ellipsis (deunicode gives "|")
         '\u{2243}' => "~=",
         '\u{2245}' => "~=",
         '\u{2248}' => "~=",
@@ -1743,6 +1853,15 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         '\u{2043}' => "-",
         '\u{2027}' => "-",
         '\u{25E6}' => "o",
+        // --- Latin-1 punctuation / currency (no block gate covers 0xA0-0xBF,
+        //     and deunicode's values are wrong: 0xA3 -> "PS", 0xA7 -> "SS") ---
+        '\u{00A2}' => "c",
+        '\u{00A3}' => "GBP",
+        '\u{00A5}' => "JPY",
+        '\u{00A6}' => "|",
+        '\u{00A7}' => "S",
+        '\u{00B6}' => "P",
+        '\u{2030}' => "0/00", // per mille (deunicode gives "%0")
         // --- Geometric shapes / stars / checks ---
         '\u{2605}' => "*",
         '\u{2606}' => "*",
@@ -1766,6 +1885,22 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         '\u{2610}' => "[ ]",
         '\u{2611}' => "[x]",
         '\u{2612}' => "[x]",
+        '\u{25AA}' => "-", // small squares used as list bullets (Emoji-classified)
+        '\u{25AB}' => "-",
+        // --- Meaning-bearing emoji marks: Emoji-classified, so they would drop
+        //     under EmojiPolicy::Drop, but they carry pass/fail/alert semantics
+        //     LLMs rely on. Curated entries win over the emoji drop; pictorial
+        //     emoji still drop. EmojiPolicy::Keep still keeps these as-is. ---
+        '\u{2705}' => "[x]", // white heavy check mark
+        '\u{274C}' => "[ ]", // cross mark
+        '\u{274E}' => "[ ]", // negative squared cross mark
+        '\u{2716}' => "x",   // heavy multiplication x
+        '\u{26A0}' => "[!]", // warning sign
+        '\u{2757}' => "!",
+        '\u{2755}' => "!",
+        '\u{2753}' => "?",
+        '\u{2754}' => "?",
+        '\u{2B50}' => "*", // star ratings
         // --- Letterlike marks (dropped as "emoji" today) ---
         '\u{00A9}' => "(c)",
         '\u{00AE}' => "(r)",
@@ -1777,12 +1912,14 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         '\u{2126}' => "ohm",
         // --- Spacing-modifier diacritics (NFKD folds these to a bare space; the
         //     fold path suppresses that space, so map them to sensible ASCII here) ---
-        '\u{00B4}' => "'",  // ´ ACUTE ACCENT
-        '\u{00A8}' => "\"", // ¨ DIAERESIS
-        '\u{00AF}' => "-",  // ¯ MACRON
-        '\u{00B8}' => ",",  // ¸ CEDILLA
-        '\u{02C6}' => "^",  // ˆ MODIFIER LETTER CIRCUMFLEX ACCENT
-        '\u{02DC}' => "~",  // ˜ SMALL TILDE
+        '\u{00B4}' => "'",   // ´ ACUTE ACCENT
+        '\u{00A8}' => "\"",  // ¨ DIAERESIS
+        '\u{00AF}' => "-",   // ¯ MACRON
+        '\u{00B8}' => ",",   // ¸ CEDILLA
+        '\u{02C6}' => "^",   // ˆ MODIFIER LETTER CIRCUMFLEX ACCENT
+        '\u{02DC}' => "~",   // ˜ SMALL TILDE
+        '\u{02DA}' => "deg", // ˚ RING ABOVE, used as a degree sign (deunicode: "@")
+        '\u{02BB}' => "'",   // ʻ okina (deunicode gives a backtick, a markdown hazard)
         // --- Technical / keyboard keys (Miscellaneous Technical) ---
         '\u{2318}' => "Cmd",
         '\u{2325}' => "Opt",
@@ -2337,11 +2474,79 @@ mod tests {
 
     #[test]
     fn scripts_still_drop_and_are_not_romanized() {
-        // The symbol gate must not enable deunicode for letter scripts.
+        // The symbol gate must not enable deunicode for letter scripts. Greek is
+        // the one deliberate exception (spelled out; see greek_letters tests).
         let c = TextCleaner::new(CleaningOptions::default());
         assert_eq!(c.clean("ok \u{4E16}\u{754C}").text, "ok"); // 世界 dropped, not "Shi Jie"
         assert_eq!(c.clean("ok \u{0430}\u{0431}").text, "ok"); // Cyrillic dropped
-        assert_eq!(c.clean("ok \u{03B1}\u{03B2}").text, "ok"); // Greek dropped
+        assert_eq!(c.clean("ok \u{0645}\u{0631}").text, "ok"); // Arabic dropped
+    }
+
+    // ---- Greek letters spell out to names (math-symbol usage) ----
+
+    #[test]
+    fn greek_letters_spell_out_to_names() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("\u{03BB} = 0.5").text, "lambda = 0.5");
+        assert_eq!(
+            c.clean("\u{0394}x \u{2264} \u{03B5}").text,
+            "Deltax <= epsilon"
+        );
+        assert_eq!(c.clean("\u{03C0} \u{2248} 3.14").text, "pi ~= 3.14");
+        assert_eq!(c.clean("\u{03A3} over \u{03C3}").text, "Sigma over sigma");
+        assert_eq!(c.clean("\u{03D5}").text, "phi"); // math phi symbol variant
+        assert_eq!(c.clean("\u{03AD}").text, "epsilon"); // monotonic accented
+    }
+
+    // ---- Meaning-bearing emoji marks transliterate; pictures still drop ----
+
+    #[test]
+    fn semantic_emoji_marks_transliterate() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("\u{2705} tests pass").text, "[x] tests pass");
+        assert_eq!(c.clean("\u{274C} build fails").text, "[ ] build fails");
+        assert_eq!(c.clean("\u{26A0}\u{FE0F} careful").text, "[!] careful"); // with VS16
+        assert_eq!(c.clean("\u{2B50}\u{2B50}\u{2B50}").text, "***");
+        assert_eq!(c.clean("done\u{2757}").text, "done!");
+        // Pictorial emoji still drop.
+        assert_eq!(c.clean("ok \u{1F44D}\u{2702}").text, "ok");
+    }
+
+    // ---- Latin-1 punctuation / currency (below the block gates) ----
+
+    #[test]
+    fn latin1_punctuation_and_currency_transliterate() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("50\u{00A2}").text, "50c");
+        assert_eq!(c.clean("\u{00A3}5").text, "GBP5");
+        assert_eq!(c.clean("\u{00A5}100").text, "JPY100");
+        assert_eq!(c.clean("a\u{00A6}b").text, "a|b");
+        assert_eq!(c.clean("\u{00A7} 230").text, "S 230");
+        assert_eq!(c.clean("\u{00B6} 4").text, "P 4");
+    }
+
+    // ---- Math extras where deunicode alone was wrong or absent ----
+
+    #[test]
+    fn math_extras_transliterate() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("x \u{2254} 5").text, "x := 5"); // ≔ (deunicode: "=")
+        assert_eq!(c.clean("A \u{21CC} B").text, "A <=> B"); // ⇌ (deunicode: "=")
+        assert_eq!(c.clean("f \u{2218} g").text, "f o g"); // ∘ (deunicode: "*")
+        assert_eq!(c.clean("a \u{226A} b").text, "a << b"); // ≪ via gate fallback
+        assert_eq!(c.clean("\u{27E8}x, y\u{27E9}").text, "<x, y>"); // ⟨⟩ via gate
+        assert_eq!(c.clean("5\u{2030}").text, "50/00"); // per mille
+    }
+
+    // ---- Phonetic Latin and modifier apostrophes ----
+
+    #[test]
+    fn phonetic_latin_and_modifier_apostrophes() {
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("don\u{02BC}t").text, "don't"); // modifier apostrophe
+        assert_eq!(c.clean("Hawai\u{02BB}i").text, "Hawai'i"); // okina, not a backtick
+        assert_eq!(c.clean("37\u{02DA}C").text, "37degC"); // spacing ring as degree
+        assert_eq!(c.clean("\u{0259}").text, "@"); // IPA schwa, SAMPA-style
     }
 
     // ---- F1: ASCII fast path must respect keyboard_only ----
@@ -2420,6 +2625,8 @@ mod tests {
             "caf\u{00E9} \u{2014} \u{00BD}",
             "\u{1F44D}\u{FE0F} done",
             "\u{00B8}\u{00B4}\u{00A8}", // spacing diacritics: the F8 regression
+            "\u{03BB} \u{03A3} \u{2705} \u{274C} \u{00A3} \u{00A7}",
+            "\u{27E8}x\u{27E9} don\u{02BC}t \u{0259}",
         ] {
             let once = c.clean(s).text.into_owned();
             let twice = c.clean(&once).text.into_owned();

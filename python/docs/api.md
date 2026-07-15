@@ -81,7 +81,7 @@ Constructor keyword arguments:
 - `keyboard_only: bool = True`
 - `extended_keyboard: bool = False`
 - `keep_emoji: bool = False`
-- `non_ascii_policy: str = "transliterate"` (`"drop"` / `"fold"` / `"transliterate"`; `"transliterate"` also maps common symbols to ASCII — `→` -> `->`, `≠` -> `!=`, `©` -> `(c)` — while letter scripts and emoji still drop)
+- `non_ascii_policy: str = "transliterate"` (`"drop"` / `"fold"` / `"transliterate"`; `"transliterate"` also maps common symbols to ASCII — `→` -> `->`, `≠` -> `!=`, `©` -> `(c)`, `✅` -> `[x]` — and spells Greek letters out to their names (`λ` -> `lambda`), while other letter scripts and pictorial emoji still drop)
 - `preserve_joiners: bool = False`
 - `remove_control_chars: bool = True`
 - `collapse_whitespace: bool = False`

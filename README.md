@@ -56,8 +56,9 @@ let cleaned = clean("Thanks 👍"); // -> "Thanks"
 
 By default, keyboard-only mode emits ASCII-safe output.
 Non-ASCII text is normalized/transliterated when feasible — Latin diacritics
-fold (`café` -> `cafe`) and common symbols map to ASCII equivalents
-(`→` -> `->`, `≠` -> `!=`, `•` -> `-`, `©` -> `(c)`); unmappable characters
+fold (`café` -> `cafe`), common symbols map to ASCII equivalents
+(`→` -> `->`, `≠` -> `!=`, `•` -> `-`, `©` -> `(c)`, `✅` -> `[x]`), and Greek
+letters spell out to their names (`λ` -> `lambda`); other unmappable characters
 (emoji, letter scripts like CJK or Cyrillic) are removed, never romanized.
 Tune this with `--non-ascii-policy`, `--extended-keyboard`, and
 `--preserve-joiners` (details in [docs/api.md](docs/api.md#keyboard-only-behavior)
