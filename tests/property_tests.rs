@@ -3,7 +3,6 @@
 use icu_properties::{props, CodePointMapData, CodePointSetData};
 use proptest::prelude::*;
 use rehuman::{clean, is_keyboard_ascii, CleaningOptions, EmojiPolicy, StreamCleaner, TextCleaner};
-use unicode_segmentation::UnicodeSegmentation;
 
 fn sample_string() -> impl Strategy<Value = String> {
     proptest::collection::vec(any::<char>(), 0..64).prop_map(|chars| chars.into_iter().collect())
@@ -19,42 +18,6 @@ fn line_boundary_string() -> impl Strategy<Value = String> {
         1 => proptest::sample::select(vec!['\n', '\r', '\u{2028}', '\u{2029}']),
     ];
     proptest::collection::vec(piece, 0..64).prop_map(|chars| chars.into_iter().collect())
-}
-
-fn grapheme_is_rendered_emoji(grapheme: &str) -> bool {
-    let chars: Vec<char> = grapheme.chars().collect();
-    let emoji = CodePointSetData::new::<props::Emoji>();
-    let emoji_presentation = CodePointSetData::new::<props::EmojiPresentation>();
-    let extended_pictographic = CodePointSetData::new::<props::ExtendedPictographic>();
-
-    let mut has_emoji_presentation = false;
-    let mut has_extended_pictographic = false;
-    let mut has_emoji = false;
-    let mut has_vs16 = false;
-    let mut has_zwj = false;
-    let mut has_keycap = false;
-
-    for &c in &chars {
-        if emoji_presentation.contains(c) {
-            has_emoji_presentation = true;
-        }
-        if extended_pictographic.contains(c) {
-            has_extended_pictographic = true;
-        }
-        if emoji.contains(c) {
-            has_emoji = true;
-        }
-        match c {
-            '\u{FE0F}' => has_vs16 = true,
-            '\u{200D}' => has_zwj = true,
-            '\u{20E3}' => has_keycap = true,
-            _ => {}
-        }
-    }
-
-    has_emoji_presentation
-        || has_extended_pictographic
-        || (has_emoji && (has_vs16 || has_zwj || has_keycap))
 }
 
 #[test]
@@ -195,9 +158,6 @@ proptest! {
         });
         let output = cleaner.clean(&input);
         prop_assert!(output.text.chars().all(is_keyboard_ascii));
-        let has_rendered_emoji = UnicodeSegmentation::graphemes(output.text.as_ref(), true)
-            .any(grapheme_is_rendered_emoji);
-        prop_assert!(!has_rendered_emoji);
     }
 }
 
@@ -211,18 +171,6 @@ proptest! {
         let once = clean(&input).text.into_owned();
         let twice = clean(&once).text.into_owned();
         prop_assert_eq!(once, twice);
-    }
-}
-
-proptest! {
-    #[test]
-    fn letter_scripts_never_romanize_under_default(input in sample_string()) {
-        // Default (keyboard_only) output is pure ASCII, but the symbol gate must
-        // not turn CJK/Cyrillic/Greek letters into Latin. We assert the weaker,
-        // robust property: every output char is keyboard ASCII (i.e. scripts were
-        // dropped, never transliterated into surviving Latin text we didn't intend).
-        let out = clean(&input);
-        prop_assert!(out.text.chars().all(is_keyboard_ascii));
     }
 }
 

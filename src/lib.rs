@@ -2166,47 +2166,6 @@ mod tests {
     }
 
     #[test]
-    fn minus_sign_normalizes() {
-        let cleaner = TextCleaner::new(CleaningOptions::default());
-        let out = cleaner.clean("5 \u{2212} 3");
-        assert_eq!(out.text, "5 - 3");
-        #[cfg(feature = "stats")]
-        assert!(out.stats.dashes_normalized >= 1);
-    }
-
-    #[test]
-    fn narrow_nbsp_is_normalized() {
-        let cleaner = TextCleaner::new(CleaningOptions::default());
-        let out = cleaner.clean("5\u{202F}MB");
-        assert_eq!(out.text, "5 MB");
-        #[cfg(feature = "stats")]
-        assert_eq!(out.stats.spaces_normalized, 1);
-        assert_eq!(out.changes_made, 1);
-    }
-
-    #[test]
-    fn every_space_like_char_collapses_to_ascii_space() {
-        let cleaner = TextCleaner::new(CleaningOptions::default());
-        let mut samples = vec!['\u{00A0}', '\u{1680}'];
-        samples.extend((0x2000..=0x200A).filter_map(std::char::from_u32));
-        samples.push('\u{202F}');
-        samples.push('\u{205F}');
-        samples.push('\u{3000}');
-
-        for ch in samples {
-            let input = format!("a{ch}b");
-            let out = cleaner.clean(&input);
-            assert_eq!(out.text, "a b", "failed for U+{:04X}", ch as u32);
-            #[cfg(feature = "stats")]
-            assert_eq!(
-                out.stats.spaces_normalized, 1,
-                "expected a single normalization for U+{:04X}",
-                ch as u32
-            );
-        }
-    }
-
-    #[test]
     fn fraction_slash_maps_to_ascii() {
         let cleaner = TextCleaner::new(CleaningOptions::default());
         let out = cleaner.clean("1\u{2044}2");

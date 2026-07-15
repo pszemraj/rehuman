@@ -150,18 +150,34 @@ fn rehuman_rejects_print_config_with_processing_flags() {
 }
 
 #[test]
-fn rehuman_rejects_explicit_emoji_policy_without_keyboard_mode() {
-    let output = run_bin(
-        "rehuman",
-        &["--keyboard-only", "false", "--emoji-policy", "drop"],
-        None,
-    );
-    assert!(!output.status.success());
-    assert!(
-        stderr_text(&output).contains("keyboard-only mode"),
-        "{}",
-        stderr_text(&output)
-    );
+fn rehuman_rejects_keyboard_dependent_options_without_keyboard_mode() {
+    let cases: &[(&[&str], &str)] = &[
+        (
+            &["--keyboard-only", "false", "--emoji-policy", "drop"],
+            "--emoji-policy",
+        ),
+        (
+            &[
+                "--keyboard-only",
+                "false",
+                "--non-ascii-policy",
+                "transliterate",
+            ],
+            "--non-ascii-policy",
+        ),
+        (
+            &["--keyboard-only", "false", "--extended-keyboard", "true"],
+            "--extended-keyboard",
+        ),
+    ];
+
+    for &(args, flag) in cases {
+        let output = run_bin("rehuman", args, None);
+        let stderr = stderr_text(&output);
+        assert!(!output.status.success(), "{flag} unexpectedly succeeded");
+        assert!(stderr.contains("keyboard-only mode"), "{stderr}");
+        assert!(stderr.contains(flag), "{stderr}");
+    }
 }
 
 #[test]
@@ -169,41 +185,6 @@ fn ishuman_rejects_explicit_emoji_policy_without_keyboard_mode() {
     let output = run_bin(
         "ishuman",
         &["--keyboard-only", "false", "--keep-emoji"],
-        None,
-    );
-    assert!(!output.status.success());
-    assert!(
-        stderr_text(&output).contains("keyboard-only mode"),
-        "{}",
-        stderr_text(&output)
-    );
-}
-
-#[test]
-fn rehuman_rejects_explicit_non_ascii_policy_without_keyboard_mode() {
-    let output = run_bin(
-        "rehuman",
-        &[
-            "--keyboard-only",
-            "false",
-            "--non-ascii-policy",
-            "transliterate",
-        ],
-        None,
-    );
-    assert!(!output.status.success());
-    assert!(
-        stderr_text(&output).contains("keyboard-only mode"),
-        "{}",
-        stderr_text(&output)
-    );
-}
-
-#[test]
-fn rehuman_rejects_extended_keyboard_without_keyboard_mode() {
-    let output = run_bin(
-        "rehuman",
-        &["--keyboard-only", "false", "--extended-keyboard", "true"],
         None,
     );
     assert!(!output.status.success());
