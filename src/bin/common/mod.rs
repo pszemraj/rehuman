@@ -40,7 +40,7 @@ pub enum PresetArg {
 ///
 /// # Returns
 /// A full [`CleaningOptions`] value for the selected preset.
-pub fn options_from_preset(preset: PresetArg) -> CleaningOptions {
+fn options_from_preset(preset: PresetArg) -> CleaningOptions {
     match preset {
         PresetArg::Minimal => CleaningOptions::minimal(),
         PresetArg::Balanced => CleaningOptions::balanced(),
@@ -501,7 +501,7 @@ impl Default for ConfigFile {
 ///
 /// # Returns
 /// The baseline CLI configuration.
-pub fn default_cli_options() -> CleaningOptions {
+fn default_cli_options() -> CleaningOptions {
     CleaningOptions::default()
 }
 
@@ -524,7 +524,7 @@ pub fn default_config_path() -> Option<PathBuf> {
 /// # Errors
 /// Returns an error if the file cannot be read, parsed, or has an unsupported
 /// schema version.
-pub fn load_config(path: &Path) -> Result<CleaningOptions> {
+fn load_config(path: &Path) -> Result<CleaningOptions> {
     let contents = fs::read_to_string(path)?;
     let config: ConfigFile = toml::from_str(&contents)?;
     if config.version != CONFIG_VERSION {
@@ -535,6 +535,43 @@ pub fn load_config(path: &Path) -> Result<CleaningOptions> {
         );
     }
     Ok(config.options.to_cleaning_options())
+}
+
+/// Resolve runtime options from defaults, config, preset, and CLI overrides.
+///
+/// # Arguments
+/// - `shared`: Shared command-line options and explicit override tracking.
+/// - `config_path`: Config path selected by the calling binary.
+///
+/// # Returns
+/// Fully resolved and dependency-validated cleaning options.
+///
+/// # Errors
+/// Returns an error when config loading fails or an explicit option is
+/// incompatible with the resolved keyboard-only mode.
+pub fn resolve_options(
+    shared: &SharedCliOptions,
+    config_path: Option<&Path>,
+) -> Result<CleaningOptions> {
+    let mut options = default_cli_options();
+
+    if let Some(path) = config_path {
+        if path.exists() {
+            options = load_config(path)
+                .with_context(|| format!("failed to read config at {}", path.display()))?;
+        }
+    }
+
+    if let Some(preset) = shared.preset {
+        options = options_from_preset(preset);
+    }
+
+    shared.to_partial_options().apply_to(&mut options);
+    validate_emoji_policy_dependency(&options, shared.emoji_policy_specified_by_user())?;
+    validate_non_ascii_policy_dependency(&options, shared.non_ascii_policy_specified_by_user())?;
+    validate_extended_keyboard_dependency(&options, shared.extended_keyboard_specified_by_user())?;
+
+    Ok(options)
 }
 
 /// Validate that explicitly requested emoji policy is meaningful.
@@ -552,7 +589,7 @@ pub fn load_config(path: &Path) -> Result<CleaningOptions> {
 /// # Errors
 /// Returns an error when emoji policy was set explicitly while
 /// `keyboard_only` is disabled.
-pub fn validate_emoji_policy_dependency(
+fn validate_emoji_policy_dependency(
     options: &CleaningOptions,
     emoji_policy_specified_by_user: bool,
 ) -> Result<()> {
@@ -578,7 +615,7 @@ pub fn validate_emoji_policy_dependency(
 /// # Errors
 /// Returns an error when non-ASCII policy was set explicitly while
 /// `keyboard_only` is disabled.
-pub fn validate_non_ascii_policy_dependency(
+fn validate_non_ascii_policy_dependency(
     options: &CleaningOptions,
     non_ascii_policy_specified_by_user: bool,
 ) -> Result<()> {
@@ -604,7 +641,7 @@ pub fn validate_non_ascii_policy_dependency(
 /// # Errors
 /// Returns an error when extended keyboard mode was set explicitly while
 /// `keyboard_only` is disabled.
-pub fn validate_extended_keyboard_dependency(
+fn validate_extended_keyboard_dependency(
     options: &CleaningOptions,
     extended_keyboard_specified_by_user: bool,
 ) -> Result<()> {

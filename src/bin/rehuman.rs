@@ -12,9 +12,7 @@ use clap::{ArgAction, Parser};
 use tempfile::NamedTempFile;
 
 use common::{
-    default_cli_options, default_config_path, load_config, options_from_preset, read_input,
-    validate_emoji_policy_dependency, validate_extended_keyboard_dependency,
-    validate_non_ascii_policy_dependency, write_stats, write_stats_json, ConfigFile,
+    default_config_path, read_input, resolve_options, write_stats, write_stats_json, ConfigFile,
     SerializableOptions, SharedCliOptions, StatsSummary, CONFIG_VERSION, MAX_INPUT_BYTES,
 };
 use rehuman::{CleaningResult, CleaningStats, StreamCleaner, TextCleaner};
@@ -37,30 +35,7 @@ fn main() -> Result<()> {
         }
     }
 
-    let mut options = default_cli_options();
-
-    if let Some(ref path) = config_path {
-        if path.exists() {
-            options = load_config(path)
-                .with_context(|| format!("failed to read config at {}", path.display()))?;
-        }
-    }
-
-    if let Some(preset) = cli.shared.preset {
-        options = options_from_preset(preset);
-    }
-
-    let overrides = cli.shared.to_partial_options();
-    overrides.apply_to(&mut options);
-    validate_emoji_policy_dependency(&options, cli.shared.emoji_policy_specified_by_user())?;
-    validate_non_ascii_policy_dependency(
-        &options,
-        cli.shared.non_ascii_policy_specified_by_user(),
-    )?;
-    validate_extended_keyboard_dependency(
-        &options,
-        cli.shared.extended_keyboard_specified_by_user(),
-    )?;
+    let options = resolve_options(&cli.shared, config_path.as_deref())?;
 
     if cli.save_config {
         if let Some(ref path) = config_path {
