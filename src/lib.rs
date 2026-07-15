@@ -1766,7 +1766,6 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         // --- Letterlike marks: emoji-classified or better than the fallback ---
         '\u{00A9}' => "(c)", // emoji-classified
         '\u{00AE}' => "(r)", // emoji-classified
-        '\u{2116}' => "No.", // deunicode: "No"
         '\u{00B5}' => "u",   // micro sign is GC=Ll, so no gate reaches it
         '\u{2126}' => "ohm", // else GREEK_MAP would give "Omega"
         // --- Spacing-modifier diacritics where the fallback misreads them ---
