@@ -12,7 +12,7 @@ use unicode_segmentation::UnicodeSegmentation;
 mod generated;
 mod sets;
 use generated::{DASH_MAP, GREEK_MAP, QUOTE_MAP, SPACE_MAP};
-use sets::{is_common_symbol_or_punctuation, is_latin_script};
+use sets::{is_common_symbol_or_punctuation, is_control_char, is_latin_script};
 pub use sets::{is_emoji, is_extended_keyboard_char, is_hidden_char, is_keyboard_ascii};
 
 const FRACTION_SLASH: char = '\u{2044}';
@@ -1404,8 +1404,7 @@ fn finish_pending_whitespace_before_break(
 }
 
 fn is_disallowed_control(c: char) -> bool {
-    let cu = c as u32;
-    ((cu <= 0x1F) || (0x7F..=0x9F).contains(&cu)) && c != '\n' && c != '\r' && c != '\t'
+    is_control_char(c) && !matches!(c, '\n' | '\r' | '\t')
 }
 
 fn is_newline_grapheme(g: &str) -> bool {

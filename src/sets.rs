@@ -36,6 +36,11 @@ pub(crate) fn is_latin_script(c: char) -> bool {
     script(c) == Script::Latin
 }
 
+/// Unicode control characters (General_Category=Control).
+pub(crate) fn is_control_char(c: char) -> bool {
+    general_category(c) == GeneralCategory::Control
+}
+
 /// Script-neutral symbols and punctuation: characters whose `General_Category`
 /// is a symbol, punctuation, separator, other-number, or modifier-letter class
 /// and whose `Script` is Common or Inherited. This is the transliteration
