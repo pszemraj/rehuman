@@ -658,6 +658,7 @@ version = "0.1.3"
 dependencies = [
  "pyo3",
  "rehuman",
+ "serde_json",
 ]
 
 [[package]]
