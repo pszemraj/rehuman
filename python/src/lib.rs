@@ -8,77 +8,95 @@ use rehuman::{
     UnicodeNormalizationMode,
 };
 
+const EMOJI_POLICY_NAMES: &[(&str, EmojiPolicy)] =
+    &[("drop", EmojiPolicy::Drop), ("keep", EmojiPolicy::Keep)];
+const NON_ASCII_POLICY_NAMES: &[(&str, NonAsciiPolicy)] = &[
+    ("drop", NonAsciiPolicy::Drop),
+    ("fold", NonAsciiPolicy::Fold),
+    ("transliterate", NonAsciiPolicy::Transliterate),
+];
+const LINE_ENDING_NAMES: &[(&str, Option<LineEndingStyle>)] = &[
+    ("auto", None),
+    ("none", None),
+    ("lf", Some(LineEndingStyle::Lf)),
+    ("crlf", Some(LineEndingStyle::Crlf)),
+    ("cr", Some(LineEndingStyle::Cr)),
+];
+const UNICODE_NORMALIZATION_NAMES: &[(&str, UnicodeNormalizationMode)] = &[
+    ("none", UnicodeNormalizationMode::None),
+    ("nfd", UnicodeNormalizationMode::NFD),
+    ("nfc", UnicodeNormalizationMode::NFC),
+    ("nfkd", UnicodeNormalizationMode::NFKD),
+    ("nfkc", UnicodeNormalizationMode::NFKC),
+];
+
+fn format_choice<T: Copy + Eq>(value: T, names: &'static [(&'static str, T)]) -> &'static str {
+    names
+        .iter()
+        .find_map(|(name, candidate)| (*candidate == value).then_some(*name))
+        .expect("every Python-facing enum value must have a canonical name")
+}
+
+fn parse_choice<T: Copy>(
+    value: &str,
+    names: &[(&str, T)],
+    label: &str,
+    expected: &str,
+) -> PyResult<T> {
+    let normalized = value.to_ascii_lowercase();
+    names
+        .iter()
+        .find_map(|(name, candidate)| (*name == normalized).then_some(*candidate))
+        .ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "invalid {label}: {normalized:?} (expected {expected})"
+            ))
+        })
+}
+
 fn format_emoji_policy(policy: EmojiPolicy) -> &'static str {
-    match policy {
-        EmojiPolicy::Drop => "drop",
-        EmojiPolicy::Keep => "keep",
-    }
+    format_choice(policy, EMOJI_POLICY_NAMES)
 }
 
 fn format_non_ascii_policy(policy: NonAsciiPolicy) -> &'static str {
-    match policy {
-        NonAsciiPolicy::Drop => "drop",
-        NonAsciiPolicy::Fold => "fold",
-        NonAsciiPolicy::Transliterate => "transliterate",
-    }
+    format_choice(policy, NON_ASCII_POLICY_NAMES)
 }
 
 fn format_line_endings(style: Option<LineEndingStyle>) -> &'static str {
-    match style {
-        None => "auto",
-        Some(LineEndingStyle::Lf) => "lf",
-        Some(LineEndingStyle::Crlf) => "crlf",
-        Some(LineEndingStyle::Cr) => "cr",
-    }
+    format_choice(style, LINE_ENDING_NAMES)
 }
 
 fn format_unicode_normalization(mode: UnicodeNormalizationMode) -> &'static str {
-    match mode {
-        UnicodeNormalizationMode::None => "none",
-        UnicodeNormalizationMode::NFD => "nfd",
-        UnicodeNormalizationMode::NFC => "nfc",
-        UnicodeNormalizationMode::NFKD => "nfkd",
-        UnicodeNormalizationMode::NFKC => "nfkc",
-    }
+    format_choice(mode, UNICODE_NORMALIZATION_NAMES)
 }
 
 fn parse_unicode_normalization(value: &str) -> PyResult<UnicodeNormalizationMode> {
-    match value.to_ascii_lowercase().as_str() {
-        "none" => Ok(UnicodeNormalizationMode::None),
-        "nfd" => Ok(UnicodeNormalizationMode::NFD),
-        "nfc" => Ok(UnicodeNormalizationMode::NFC),
-        "nfkd" => Ok(UnicodeNormalizationMode::NFKD),
-        "nfkc" => Ok(UnicodeNormalizationMode::NFKC),
-        other => Err(PyValueError::new_err(format!(
-            "invalid normalization mode: {other:?} (expected none/nfd/nfc/nfkd/nfkc)"
-        ))),
-    }
+    parse_choice(
+        value,
+        UNICODE_NORMALIZATION_NAMES,
+        "normalization mode",
+        "none/nfd/nfc/nfkd/nfkc",
+    )
 }
 
 fn parse_non_ascii_policy(value: &str) -> PyResult<NonAsciiPolicy> {
-    match value.to_ascii_lowercase().as_str() {
-        "drop" => Ok(NonAsciiPolicy::Drop),
-        "fold" => Ok(NonAsciiPolicy::Fold),
-        "transliterate" => Ok(NonAsciiPolicy::Transliterate),
-        other => Err(PyValueError::new_err(format!(
-            "invalid non-ASCII policy: {other:?} (expected drop/fold/transliterate)"
-        ))),
-    }
+    parse_choice(
+        value,
+        NON_ASCII_POLICY_NAMES,
+        "non-ASCII policy",
+        "drop/fold/transliterate",
+    )
 }
 
 fn parse_line_endings(value: Option<&str>) -> PyResult<Option<LineEndingStyle>> {
-    match value.map(str::to_ascii_lowercase) {
-        None => Ok(None),
-        Some(mode) => match mode.as_str() {
-            "auto" | "none" => Ok(None),
-            "lf" => Ok(Some(LineEndingStyle::Lf)),
-            "crlf" => Ok(Some(LineEndingStyle::Crlf)),
-            "cr" => Ok(Some(LineEndingStyle::Cr)),
-            other => Err(PyValueError::new_err(format!(
-                "invalid line ending style: {other:?} (expected auto/none/lf/crlf/cr)"
-            ))),
-        },
-    }
+    value.map_or(Ok(None), |value| {
+        parse_choice(
+            value,
+            LINE_ENDING_NAMES,
+            "line ending style",
+            "auto/none/lf/crlf/cr",
+        )
+    })
 }
 
 fn stats_to_dict<'py>(py: Python<'py>, stats: &CleaningStats) -> PyResult<Bound<'py, PyDict>> {

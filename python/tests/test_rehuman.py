@@ -113,6 +113,14 @@ def test_line_endings_lf() -> None:
     assert result.text == "a\nb\nc\n"
 
 
+@pytest.mark.parametrize("line_endings", [None, "auto", "none"])
+def test_line_ending_preservation_aliases(line_endings: str | None) -> None:
+    """Both names for preserving line endings remain accepted."""
+    options = rehuman.Options(line_endings=line_endings)
+    result = rehuman.Cleaner(options).clean("a\r\nb\rc\n")
+    assert result.text == "a\r\nb\rc\n"
+
+
 def test_unorm_is_available_by_default() -> None:
     """Default bindings build includes `unorm` and composes decomposed chars."""
     options = rehuman.Options(keyboard_only=False, unicode_normalization="nfkc")
