@@ -11,7 +11,8 @@ use unicode_segmentation::UnicodeSegmentation;
 
 mod generated;
 mod sets;
-use generated::{DASH_MAP, QUOTE_MAP, SPACE_MAP};
+use generated::{DASH_MAP, GREEK_MAP, QUOTE_MAP, SPACE_MAP};
+use sets::{is_common_symbol_or_punctuation, is_latin_script};
 pub use sets::{is_emoji, is_extended_keyboard_char, is_hidden_char, is_keyboard_ascii};
 
 const FRACTION_SLASH: char = '\u{2044}';
@@ -1576,17 +1577,16 @@ fn append_transliterated_non_ascii(c: char, out: &mut String, extended_keyboard:
         return append_mapping(Some(mapping), out, extended_keyboard);
     }
 
-    // Long-tail fallback via deunicode, scoped to Latin *or* symbol blocks. The
-    // scope is deliberate: deunicode romanizes scripts (世 -> "Shi "), which we do
-    // NOT want, so script characters are never passed to it and continue to drop.
+    // Long-tail fallback via deunicode, scoped by Unicode properties: Latin
+    // script, or script-neutral symbols/punctuation. The scope is deliberate:
+    // deunicode romanizes scripts (世 -> "Shi "), which we do NOT want, so
+    // letters of concrete scripts are never passed to it and continue to drop.
     // Emoji-property chars are excluded for the same reason: deunicode expands
     // them to English names (✂ -> "scissors"), which is worse than dropping them
     // with the rest of the emoji. Curated entries above still win for the emoji
     // marks we do want (© ® ✓ …). The output is trimmed because deunicode pads
     // some mappings with spaces that would escape trailing-whitespace trimming.
-    if is_latin_transliteration_candidate(c)
-        || (is_symbol_transliteration_candidate(c) && !is_emoji(c))
-    {
+    if is_latin_script(c) || (is_common_symbol_or_punctuation(c) && !is_emoji(c)) {
         if let Some(mapped) = deunicode_char(c) {
             return append_mapping(Some(mapped.trim()), out, extended_keyboard);
         }
@@ -1609,147 +1609,18 @@ fn append_mapping(mapping: Option<&str>, out: &mut String, extended_keyboard: bo
     }
 }
 
-fn is_latin_transliteration_candidate(c: char) -> bool {
-    matches!(
-        c as u32,
-        0x00C0..=0x024F
-            | 0x0250..=0x02AF // IPA Extensions (SAMPA-style ASCII via deunicode)
-            | 0x02B0..=0x02FF // Spacing Modifier Letters (phonetics, okina, stress marks)
-            | 0x1D00..=0x1D7F // Phonetic Extensions
-            | 0x1D80..=0x1DBF // Phonetic Extensions Supplement
-            | 0x1E00..=0x1EFF
-            | 0x2C60..=0x2C7F
-            | 0xA720..=0xA7FF
-            | 0xAB30..=0xAB6F
-            | 0x10780..=0x107BF
-            | 0x1DF00..=0x1DFFF
-    )
-}
-
 /// Greek letters spell out to their English names under `Transliterate`. Greek
 /// is the one deliberate exception to the "letter scripts drop" rule: LLM
 /// output overwhelmingly uses Greek letters as math/stats symbols ("lambda =
 /// 0.5", "Delta x"), where silent deletion destroys meaning. The cost is that
 /// actual Greek-language prose becomes concatenated letter names; that trade
 /// was made consciously. Other scripts (CJK, Cyrillic, Arabic, ...) still drop.
+///
+/// The table is generated in `build.rs` from the 24 base letter names: every
+/// Greek-script character whose NFKD form reduces to a base letter (accented,
+/// polytonic, final/lunate sigma, math symbol variants) maps to that name.
 fn greek_translit(c: char) -> Option<&'static str> {
-    Some(match c {
-        // Uppercase
-        '\u{0391}' => "Alpha",
-        '\u{0392}' => "Beta",
-        '\u{0393}' => "Gamma",
-        '\u{0394}' => "Delta",
-        '\u{0395}' => "Epsilon",
-        '\u{0396}' => "Zeta",
-        '\u{0397}' => "Eta",
-        '\u{0398}' => "Theta",
-        '\u{0399}' => "Iota",
-        '\u{039A}' => "Kappa",
-        '\u{039B}' => "Lambda",
-        '\u{039C}' => "Mu",
-        '\u{039D}' => "Nu",
-        '\u{039E}' => "Xi",
-        '\u{039F}' => "Omicron",
-        '\u{03A0}' => "Pi",
-        '\u{03A1}' => "Rho",
-        '\u{03A3}' => "Sigma",
-        '\u{03A4}' => "Tau",
-        '\u{03A5}' => "Upsilon",
-        '\u{03A6}' => "Phi",
-        '\u{03A7}' => "Chi",
-        '\u{03A8}' => "Psi",
-        '\u{03A9}' => "Omega",
-        // Lowercase
-        '\u{03B1}' => "alpha",
-        '\u{03B2}' => "beta",
-        '\u{03B3}' => "gamma",
-        '\u{03B4}' => "delta",
-        '\u{03B5}' => "epsilon",
-        '\u{03B6}' => "zeta",
-        '\u{03B7}' => "eta",
-        '\u{03B8}' => "theta",
-        '\u{03B9}' => "iota",
-        '\u{03BA}' => "kappa",
-        '\u{03BB}' => "lambda",
-        '\u{03BC}' => "mu",
-        '\u{03BD}' => "nu",
-        '\u{03BE}' => "xi",
-        '\u{03BF}' => "omicron",
-        '\u{03C0}' => "pi",
-        '\u{03C1}' => "rho",
-        '\u{03C2}' => "sigma", // final sigma
-        '\u{03C3}' => "sigma",
-        '\u{03C4}' => "tau",
-        '\u{03C5}' => "upsilon",
-        '\u{03C6}' => "phi",
-        '\u{03C7}' => "chi",
-        '\u{03C8}' => "psi",
-        '\u{03C9}' => "omega",
-        // Monotonic accented vowels (NFKD folds to base + mark, but the fold
-        // emits nothing keyboard-safe, so the original char lands here).
-        '\u{0386}' => "Alpha",
-        '\u{0388}' => "Epsilon",
-        '\u{0389}' => "Eta",
-        '\u{038A}' => "Iota",
-        '\u{038C}' => "Omicron",
-        '\u{038E}' => "Upsilon",
-        '\u{038F}' => "Omega",
-        '\u{03AA}' => "Iota",
-        '\u{03AB}' => "Upsilon",
-        '\u{03AC}' => "alpha",
-        '\u{03AD}' => "epsilon",
-        '\u{03AE}' => "eta",
-        '\u{03AF}' => "iota",
-        '\u{0390}' => "iota",
-        '\u{03B0}' => "upsilon",
-        '\u{03CA}' => "iota",
-        '\u{03CB}' => "upsilon",
-        '\u{03CC}' => "omicron",
-        '\u{03CD}' => "upsilon",
-        '\u{03CE}' => "omega",
-        // Math-style symbol variants
-        '\u{03D0}' => "beta",
-        '\u{03D1}' => "theta",
-        '\u{03D5}' => "phi",
-        '\u{03D6}' => "pi",
-        '\u{03F0}' => "kappa",
-        '\u{03F1}' => "rho",
-        '\u{03F2}' => "sigma",
-        '\u{03F4}' => "Theta",
-        '\u{03F5}' => "epsilon",
-        _ => return None,
-    })
-}
-
-/// Symbol / punctuation blocks whose members may be transliterated via
-/// `deunicode`. Deliberately distinct from script blocks (CJK, Cyrillic, Greek,
-/// Arabic, …), which are excluded so they keep dropping rather than being
-/// romanized. Used only as the fallback gate *after* the curated `symbol_translit`
-/// table, which gives nicer ASCII for the common glyphs.
-fn is_symbol_transliteration_candidate(c: char) -> bool {
-    matches!(
-        c as u32,
-        0x2000..=0x206F   // General Punctuation
-            | 0x2070..=0x209F // Superscripts and Subscripts
-            | 0x20A0..=0x20CF // Currency Symbols
-            | 0x2100..=0x214F // Letterlike Symbols (™ © ® ℠ № …)
-            | 0x2150..=0x218F // Number Forms (⅓, Ⅻ, …)
-            | 0x2190..=0x21FF // Arrows
-            | 0x2200..=0x22FF // Mathematical Operators
-            | 0x2300..=0x23FF // Miscellaneous Technical (⌘ ⌥ ⏎ …)
-            | 0x2460..=0x24FF // Enclosed Alphanumerics
-            | 0x2500..=0x257F // Box Drawing
-            | 0x2580..=0x259F // Block Elements
-            | 0x25A0..=0x25FF // Geometric Shapes
-            | 0x2600..=0x26FF // Miscellaneous Symbols
-            | 0x2700..=0x27BF // Dingbats
-            | 0x27C0..=0x27EF // Miscellaneous Mathematical Symbols-A
-            | 0x27F0..=0x27FF // Supplemental Arrows-A
-            | 0x2900..=0x297F // Supplemental Arrows-B
-            | 0x2980..=0x29FF // Miscellaneous Mathematical Symbols-B
-            | 0x2A00..=0x2AFF // Supplemental Mathematical Operators
-            | 0x2B00..=0x2BFF // Miscellaneous Symbols and Arrows
-    )
+    GREEK_MAP.get(&c).copied()
 }
 
 /// Meaning-preserving ASCII for characters whose NFKD decomposition would
@@ -1767,16 +1638,22 @@ fn compat_override(c: char) -> Option<&'static str> {
     })
 }
 
-/// Curated symbol -> ASCII table for the glyphs LLMs emit constantly. Hand-tuned
-/// because `deunicode`'s symbol mappings are often crude (`→`->`-`, `⇒`->`=`); this
-/// gives `->`, `==>`, etc. Anything not listed falls through to the `deunicode`
-/// fallback gated by [`is_symbol_transliteration_candidate`]. Do NOT add characters
-/// that NFKD already folds well (`™`->`TM`, `½`->`1/2`); NFKD runs first and such
-/// entries would be dead code.
+/// Curated symbol -> ASCII overrides for glyphs where the automatic layers get
+/// it wrong. This table is deliberately minimal; most symbols are handled
+/// without it. Do NOT add an entry unless BOTH automatic layers fail:
+///
+/// - NFKD runs first (`™`->`TM`, `½`->`1/2`) — an entry it covers is dead code;
+/// - the `deunicode` fallback runs after — an entry returning the same string
+///   deunicode already gives is redundant (verify with `deunicode_char`).
+///
+/// Legitimate reasons to be here: deunicode is lossy for the char (`→`->`-`,
+/// `≔`->`=`, `£`->`PS`), or the char is Emoji-classified so the fallback never
+/// sees it (`©`, `✅`) yet its meaning is worth keeping.
 fn symbol_translit(c: char) -> Option<&'static str> {
     Some(match c {
-        // --- Arrows (common; deunicode handles the long tail). Double arrows use
-        //     `==>` (not `=>`) so they never collide with `≤`/`≥` output. ---
+        // --- Arrows: deunicode collapses direction/shaft (`→`->`-`, `⇒`->`=`).
+        //     Double arrows use `==>` (not `=>`) so they never collide with the
+        //     `<=`/`>=` output of the relational operators. ---
         '\u{2192}' => "->",
         '\u{2190}' => "<-",
         '\u{2194}' => "<->",
@@ -1801,26 +1678,19 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         '\u{27A4}' => "->",
         '\u{21CC}' => "<=>", // chemical equilibrium (deunicode gives bare "=")
         '\u{21CB}' => "<=>",
-        // --- Relational / math operators with no ASCII NFKD (else dropped),
-        //     or where the deunicode fallback is wrong (noted per entry) ---
-        '\u{2264}' => "<=",
-        '\u{2265}' => ">=",
+        // --- Math operators deunicode flattens to a bare sign or single letter ---
         '\u{2254}' => ":=", // deunicode drops the colon ("=")
         '\u{2255}' => "=:",
         '\u{2218}' => "o",   // function composition (deunicode gives "*")
         '\u{22EE}' => "...", // vertical ellipsis (deunicode gives "|")
         '\u{2243}' => "~=",
-        '\u{2245}' => "~=",
         '\u{2248}' => "~=",
         '\u{2261}' => "===",
-        '\u{221E}' => "inf",
-        '\u{00B1}' => "+/-",
+        '\u{00B1}' => "+/-", // deunicode gives "+-"
         '\u{2213}' => "-/+",
-        '\u{2211}' => "sum",
+        '\u{2211}' => "sum", // deunicode gives "S"
         '\u{220F}' => "prod",
-        '\u{221A}' => "sqrt",
         '\u{222B}' => "int",
-        '\u{2202}' => "d",
         '\u{2207}' => "grad",
         '\u{2206}' => "delta",
         '\u{2205}' => "{}",
@@ -1828,10 +1698,9 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         '\u{220B}' => "ni",
         '\u{2227}' => "and",
         '\u{2228}' => "or",
-        '\u{00AC}' => "!",
         '\u{2200}' => "forall",
         '\u{2203}' => "exists",
-        // --- Negated operators that drop today: give meaning, never invert ---
+        // --- Negated operators: deunicode strips the negation entirely ---
         '\u{2270}' => "!<=",
         '\u{2271}' => "!>=",
         '\u{2209}' => "!in",
@@ -1842,50 +1711,32 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         '\u{2244}' => "!~=",
         '\u{2249}' => "!~~",
         '\u{2262}' => "!==",
-        // --- Multiplication / division / dots / bullets ---
-        '\u{00D7}' => "x",
-        '\u{00F7}' => "/",
-        '\u{22C5}' => "*",
-        '\u{2219}' => "*",
-        '\u{00B7}' => "*",
+        // --- Bullets read as list markers, not asterisks ---
         '\u{2022}' => "-",
         '\u{2023}' => "-",
         '\u{2043}' => "-",
         '\u{2027}' => "-",
         '\u{25E6}' => "o",
-        // --- Latin-1 punctuation / currency (no block gate covers 0xA0-0xBF,
-        //     and deunicode's values are wrong: 0xA3 -> "PS", 0xA7 -> "SS") ---
-        '\u{00A2}' => "c",
-        '\u{00A3}' => "GBP",
-        '\u{00A5}' => "JPY",
-        '\u{00A6}' => "|",
-        '\u{00A7}' => "S",
-        '\u{00B6}' => "P",
-        '\u{2030}' => "0/00", // per mille (deunicode gives "%0")
-        // --- Geometric shapes / stars / checks ---
-        '\u{2605}' => "*",
-        '\u{2606}' => "*",
-        '\u{25CF}' => "*",
         '\u{25CB}' => "o",
-        '\u{25C9}' => "*",
-        '\u{25A0}' => "#",
+        // --- Latin-1 currency/marks where deunicode is wrong ---
+        '\u{00A2}' => "c",    // deunicode: "C/"
+        '\u{00A3}' => "GBP",  // deunicode: "PS"
+        '\u{00A5}' => "JPY",  // deunicode: "Y="
+        '\u{00A7}' => "S",    // deunicode: "SS"
+        '\u{2030}' => "0/00", // per mille (deunicode gives "%0")
+        // --- Shapes/checks where deunicode is lossy or the char is emoji ---
         '\u{25A1}' => "[ ]",
-        '\u{25B6}' => ">",
-        '\u{25C0}' => "<",
-        '\u{25B2}' => "^",
-        '\u{25BC}' => "v",
-        '\u{25B8}' => ">",
-        '\u{25C2}' => "<",
+        '\u{25B6}' => ">", // emoji-classified, so the fallback never sees it
+        '\u{25C0}' => "<", // emoji-classified
+        '\u{25BC}' => "v", // lowercase for symmetry with the ↓/▲ family
         '\u{25C6}' => "<>",
         '\u{25C7}' => "<>",
-        '\u{2713}' => "[x]",
-        '\u{2714}' => "[x]",
+        '\u{2713}' => "[x]", // deunicode: "OK"
+        '\u{2714}' => "[x]", // deunicode: "checkmark"
         '\u{2717}' => "[ ]",
         '\u{2718}' => "[ ]",
-        '\u{2610}' => "[ ]",
-        '\u{2611}' => "[x]",
-        '\u{2612}' => "[x]",
-        '\u{25AA}' => "-", // small squares used as list bullets (Emoji-classified)
+        '\u{2611}' => "[x]", // emoji-classified
+        '\u{25AA}' => "-",   // small squares used as list bullets (emoji-classified)
         '\u{25AB}' => "-",
         // --- Meaning-bearing emoji marks: Emoji-classified, so they would drop
         //     under EmojiPolicy::Drop, but they carry pass/fail/alert semantics
@@ -1901,26 +1752,16 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         '\u{2753}' => "?",
         '\u{2754}' => "?",
         '\u{2B50}' => "*", // star ratings
-        // --- Letterlike marks (dropped as "emoji" today) ---
-        '\u{00A9}' => "(c)",
-        '\u{00AE}' => "(r)",
-        '\u{2117}' => "(p)",
-        '\u{2120}' => "(sm)",
-        '\u{2116}' => "No.",
-        '\u{00B0}' => "deg",
-        '\u{00B5}' => "u",
-        '\u{2126}' => "ohm",
-        // --- Spacing-modifier diacritics (NFKD folds these to a bare space; the
-        //     fold path suppresses that space, so map them to sensible ASCII here) ---
-        '\u{00B4}' => "'",   // ´ ACUTE ACCENT
-        '\u{00A8}' => "\"",  // ¨ DIAERESIS
-        '\u{00AF}' => "-",   // ¯ MACRON
-        '\u{00B8}' => ",",   // ¸ CEDILLA
-        '\u{02C6}' => "^",   // ˆ MODIFIER LETTER CIRCUMFLEX ACCENT
-        '\u{02DC}' => "~",   // ˜ SMALL TILDE
+        // --- Letterlike marks: emoji-classified or better than the fallback ---
+        '\u{00A9}' => "(c)", // emoji-classified
+        '\u{00AE}' => "(r)", // emoji-classified
+        '\u{2116}' => "No.", // deunicode: "No"
+        '\u{00B5}' => "u",   // micro sign is GC=Ll, so no gate reaches it
+        '\u{2126}' => "ohm", // else GREEK_MAP would give "Omega"
+        // --- Spacing-modifier diacritics where the fallback misreads them ---
         '\u{02DA}' => "deg", // ˚ RING ABOVE, used as a degree sign (deunicode: "@")
         '\u{02BB}' => "'",   // ʻ okina (deunicode gives a backtick, a markdown hazard)
-        // --- Technical / keyboard keys (Miscellaneous Technical) ---
+        // --- Technical / keyboard keys (deunicode gives "#", "*", "<", ...) ---
         '\u{2318}' => "Cmd",
         '\u{2325}' => "Opt",
         '\u{2303}' => "Ctrl",
@@ -1929,7 +1770,7 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         '\u{238B}' => "Esc",
         '\u{232B}' => "Bksp",
         '\u{2326}' => "Del",
-        '\u{23CF}' => "Eject",
+        '\u{23CF}' => "Eject", // emoji-classified, so the fallback never sees it
         _ => return None,
     })
 }
