@@ -252,22 +252,14 @@ impl CleaningOptions {
     /// A conservative preset that performs minimal transformations.
     pub fn minimal() -> Self {
         Self {
-            remove_hidden: true,
             remove_trailing_whitespace: false,
             normalize_spaces: false,
             normalize_dashes: false,
             normalize_quotes: false,
             normalize_other: false,
             keyboard_only: false,
-            extended_keyboard: false,
-            emoji_policy: EmojiPolicy::Drop,
-            non_ascii_policy: NonAsciiPolicy::Transliterate,
-            preserve_joiners: false,
             remove_control_chars: false,
-            collapse_whitespace: false,
-            normalize_line_endings: None,
-            unicode_normalization: UnicodeNormalizationMode::None,
-            strip_bidi_controls: false,
+            ..Self::default()
         }
     }
 
@@ -277,22 +269,9 @@ impl CleaningOptions {
     /// A general-purpose preset for normal prose cleanup.
     pub fn balanced() -> Self {
         Self {
-            remove_hidden: true,
-            remove_trailing_whitespace: true,
-            normalize_spaces: true,
-            normalize_dashes: true,
-            normalize_quotes: true,
-            normalize_other: true,
             keyboard_only: false,
-            extended_keyboard: false,
-            emoji_policy: EmojiPolicy::Drop,
-            non_ascii_policy: NonAsciiPolicy::Transliterate,
-            preserve_joiners: false,
-            remove_control_chars: true,
             unicode_normalization: UnicodeNormalizationMode::NFC,
-            collapse_whitespace: false,
-            normalize_line_endings: None,
-            strip_bidi_controls: false,
+            ..Self::default()
         }
     }
 
@@ -302,22 +281,10 @@ impl CleaningOptions {
     /// A preset tuned for typographic normalization and whitespace cleanup.
     pub fn humanize() -> Self {
         Self {
-            remove_hidden: true,
-            remove_trailing_whitespace: true,
-            normalize_spaces: true,
-            normalize_dashes: true,
-            normalize_quotes: true,
-            normalize_other: true,
             keyboard_only: false,
-            extended_keyboard: false,
-            emoji_policy: EmojiPolicy::Drop,
-            non_ascii_policy: NonAsciiPolicy::Transliterate,
-            preserve_joiners: false,
-            remove_control_chars: true,
             unicode_normalization: UnicodeNormalizationMode::NFKC,
             collapse_whitespace: true,
-            normalize_line_endings: None,
-            strip_bidi_controls: false,
+            ..Self::default()
         }
     }
 
@@ -327,22 +294,11 @@ impl CleaningOptions {
     /// A strict preset that targets keyboard-safe output.
     pub fn aggressive() -> Self {
         Self {
-            remove_hidden: true,
-            remove_trailing_whitespace: true,
-            normalize_spaces: true,
-            normalize_dashes: true,
-            normalize_quotes: true,
-            normalize_other: true,
-            keyboard_only: true,
-            extended_keyboard: false,
-            emoji_policy: EmojiPolicy::Drop,
-            non_ascii_policy: NonAsciiPolicy::Transliterate,
-            preserve_joiners: false,
-            remove_control_chars: true,
             collapse_whitespace: true,
             normalize_line_endings: Some(LineEndingStyle::Lf),
             unicode_normalization: UnicodeNormalizationMode::NFKC,
             strip_bidi_controls: true,
+            ..Self::default()
         }
     }
 
@@ -353,22 +309,13 @@ impl CleaningOptions {
     /// still removing hidden/control noise.
     pub fn code_safe() -> Self {
         Self {
-            remove_hidden: true,
-            remove_trailing_whitespace: true,
-            normalize_spaces: true,
             normalize_dashes: false,
             normalize_quotes: false,
             normalize_other: false,
             keyboard_only: false,
-            extended_keyboard: false,
             emoji_policy: EmojiPolicy::Keep,
-            non_ascii_policy: NonAsciiPolicy::Transliterate,
             preserve_joiners: true,
-            remove_control_chars: true,
-            collapse_whitespace: false,
-            normalize_line_endings: None,
-            unicode_normalization: UnicodeNormalizationMode::None,
-            strip_bidi_controls: false,
+            ..Self::default()
         }
     }
 }
