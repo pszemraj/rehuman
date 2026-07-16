@@ -187,11 +187,13 @@ pub struct CleaningStats {
     pub hidden_chars_removed: u64,
     pub trailing_whitespace_removed: u64,
     pub spaces_normalized: u64,
+    pub whitespace_collapsed: u64,
     pub dashes_normalized: u64,
     pub quotes_normalized: u64,
     pub other_normalized: u64,
     pub control_chars_removed: u64,
     pub line_endings_normalized: u64,
+    pub unicode_normalized: u64,
     pub non_keyboard_removed: u64,
     pub non_keyboard_transliterated: u64,
     pub emojis_dropped: u64,
@@ -200,7 +202,15 @@ pub struct CleaningStats {
 }
 ```
 
-Use these metrics for monitoring, debugging, or reporting.
+`whitespace_collapsed` counts characters removed when `collapse_whitespace`
+shortens a run (a lone tab canonicalized to a space counts as 1).
+`unicode_normalized` is 1 when the requested Unicode normalization rewrote
+the input, 0 otherwise.
+
+Use these metrics for monitoring, debugging, or reporting. `changes_made` is
+the contract `ishuman` and `--exit-code` rely on: it is non-zero whenever the
+cleaned output differs from the input. Tabs and spaces the options do not
+target pass through verbatim (tabs are never silently converted to spaces).
 
 ## Reusing Buffers
 

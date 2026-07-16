@@ -61,11 +61,13 @@ pub struct CleaningStats {
     pub hidden_chars_removed: u64,
     pub trailing_whitespace_removed: u64,
     pub spaces_normalized: u64,
+    pub whitespace_collapsed: u64,
     pub dashes_normalized: u64,
     pub quotes_normalized: u64,
     pub other_normalized: u64,
     pub control_chars_removed: u64,
     pub line_endings_normalized: u64,
+    pub unicode_normalized: u64,
     pub non_keyboard_removed: u64,
     pub non_keyboard_transliterated: u64,
     pub emojis_dropped: u64,
@@ -118,6 +120,9 @@ impl CleaningStats {
         self.spaces_normalized = self
             .spaces_normalized
             .saturating_add(other.spaces_normalized);
+        self.whitespace_collapsed = self
+            .whitespace_collapsed
+            .saturating_add(other.whitespace_collapsed);
         self.dashes_normalized = self
             .dashes_normalized
             .saturating_add(other.dashes_normalized);
@@ -131,6 +136,9 @@ impl CleaningStats {
         self.line_endings_normalized = self
             .line_endings_normalized
             .saturating_add(other.line_endings_normalized);
+        self.unicode_normalized = self
+            .unicode_normalized
+            .saturating_add(other.unicode_normalized);
         self.non_keyboard_removed = self
             .non_keyboard_removed
             .saturating_add(other.non_keyboard_removed);
@@ -652,7 +660,7 @@ impl TextCleaner {
         text: &'a str,
         has_prior_output: bool,
     ) -> Result<CleaningResult<'a>, CleaningError> {
-        let Some(working) = self.prepare_input(text)? else {
+        let Some((working, renormalized)) = self.prepare_input(text)? else {
             return Ok(CleaningResult {
                 text: Cow::Borrowed(text),
                 changes_made: 0,
@@ -661,7 +669,8 @@ impl TextCleaner {
         };
 
         let mut buffer = String::with_capacity(working.len());
-        let (changes, stats) = self.clean_into_internal(working, &mut buffer, has_prior_output);
+        let (changes, stats) =
+            self.clean_into_internal(working, &mut buffer, has_prior_output, renormalized);
         Ok(CleaningResult {
             text: Cow::Owned(buffer),
             changes_made: changes,
@@ -690,7 +699,7 @@ impl TextCleaner {
     ) -> Result<CleaningResult<'output>, CleaningError> {
         out.clear();
 
-        let Some(working) = self.prepare_input(text)? else {
+        let Some((working, renormalized)) = self.prepare_input(text)? else {
             out.push_str(text);
             return Ok(CleaningResult {
                 text: Cow::Borrowed(out.as_str()),
@@ -699,7 +708,8 @@ impl TextCleaner {
             });
         };
 
-        let (changes, stats) = self.clean_into_internal(working, out, has_prior_output);
+        let (changes, stats) =
+            self.clean_into_internal(working, out, has_prior_output, renormalized);
         Ok(CleaningResult {
             text: Cow::Borrowed(out.as_str()),
             changes_made: changes,
@@ -712,11 +722,16 @@ impl TextCleaner {
         working_input: Cow<'_, str>,
         out: &mut String,
         has_prior_output: bool,
+        renormalized: bool,
     ) -> (u64, CleaningStats) {
         // Without the `stats` feature, record_stat! never mutates the struct.
         #[cfg_attr(not(feature = "stats"), allow(unused_mut))]
         let mut stats = CleaningStats::default();
         let mut changes = 0u64;
+
+        if renormalized {
+            record_change!(changes, stats, unicode_normalized);
+        }
 
         let mut working = working_input;
 
@@ -730,7 +745,9 @@ impl TextCleaner {
         out.clear();
         out.reserve(working.len());
 
-        let mut pending_ws: usize = 0;
+        // Buffered run of ' '/'\t' chars kept verbatim so a flush without
+        // collapse reproduces the input bytes (tabs must survive cleaning).
+        let mut pending_ws = String::new();
         let mut cap_next_whitespace = false;
         let mut drop_leading_whitespace = false;
         let mut emitted_anything = has_prior_output;
@@ -887,6 +904,8 @@ impl TextCleaner {
                                 collapse,
                                 drop_leading_whitespace,
                                 emitted_anything,
+                                &mut changes,
+                                &mut stats,
                             );
                             out.push_str("...");
                             emitted_anything = true;
@@ -911,12 +930,12 @@ impl TextCleaner {
             }
 
             if cluster_buffer.chars().all(|ch| matches!(ch, ' ' | '\t')) {
-                let count = cluster_buffer.chars().count();
                 if cap_next_whitespace {
-                    pending_ws = 1;
+                    pending_ws.clear();
+                    pending_ws.push(' ');
                     cap_next_whitespace = false;
                 } else {
-                    pending_ws = pending_ws.saturating_add(count);
+                    pending_ws.push_str(&cluster_buffer);
                 }
                 continue;
             }
@@ -930,6 +949,8 @@ impl TextCleaner {
                         collapse,
                         drop_leading_whitespace,
                         emitted_anything,
+                        &mut changes,
+                        &mut stats,
                     );
                     out.push_str(&cluster_buffer);
                     emitted_anything = true;
@@ -966,6 +987,8 @@ impl TextCleaner {
                         collapse,
                         drop_leading_whitespace,
                         emitted_anything,
+                        &mut changes,
+                        &mut stats,
                     );
                     out.push_str(&cluster_buffer);
                     emitted_anything = true;
@@ -986,9 +1009,10 @@ impl TextCleaner {
                     record_change!(changes, stats, emojis_dropped);
                     cluster_buffer.clear();
                     cap_next_whitespace = true;
-                    drop_leading_whitespace = pending_ws == 0 && !emitted_anything;
-                    if pending_ws > 0 {
-                        pending_ws = 1;
+                    drop_leading_whitespace = pending_ws.is_empty() && !emitted_anything;
+                    if !pending_ws.is_empty() {
+                        pending_ws.clear();
+                        pending_ws.push(' ');
                     }
                 } else {
                     let removed = cluster_buffer
@@ -1000,9 +1024,10 @@ impl TextCleaner {
                     }
                     cluster_buffer.clear();
                     cap_next_whitespace = true;
-                    drop_leading_whitespace = pending_ws == 0 && !emitted_anything;
-                    if pending_ws > 0 {
-                        pending_ws = 1;
+                    drop_leading_whitespace = pending_ws.is_empty() && !emitted_anything;
+                    if !pending_ws.is_empty() {
+                        pending_ws.clear();
+                        pending_ws.push(' ');
                     }
                 }
             } else {
@@ -1012,6 +1037,8 @@ impl TextCleaner {
                     collapse,
                     drop_leading_whitespace,
                     emitted_anything,
+                    &mut changes,
+                    &mut stats,
                 );
                 out.push_str(&cluster_buffer);
                 emitted_anything = true;
@@ -1020,8 +1047,13 @@ impl TextCleaner {
         }
 
         if trim {
-            if pending_ws > 0 {
-                record_change!(changes, stats, trailing_whitespace_removed, pending_ws);
+            if !pending_ws.is_empty() {
+                record_change!(
+                    changes,
+                    stats,
+                    trailing_whitespace_removed,
+                    pending_ws.chars().count()
+                );
             }
         } else {
             flush_or_drop_pending_whitespace(
@@ -1030,6 +1062,8 @@ impl TextCleaner {
                 collapse,
                 drop_leading_whitespace,
                 emitted_anything,
+                &mut changes,
+                &mut stats,
             );
         }
 
@@ -1058,11 +1092,26 @@ impl TextCleaner {
         (changes, stats)
     }
 
-    fn prepare_input<'a>(&self, text: &'a str) -> Result<Option<Cow<'a, str>>, CleaningError> {
+    /// Prepare input for the cleaning loop.
+    ///
+    /// Returns `None` when the fast path applies, otherwise the (possibly
+    /// normalized) working text plus whether Unicode normalization rewrote
+    /// it — the caller must count that rewrite as a change.
+    fn prepare_input<'a>(
+        &self,
+        text: &'a str,
+    ) -> Result<Option<(Cow<'a, str>, bool)>, CleaningError> {
         if text.is_empty() || self.can_use_ascii_fast_path(text) {
             Ok(None)
         } else {
-            self.normalize_input(text).map(Some)
+            let working = self.normalize_input(text)?;
+            // Non-`None` modes always return an owned string; it counts as a
+            // rewrite only when it differs from the input.
+            let renormalized = match &working {
+                Cow::Borrowed(_) => false,
+                Cow::Owned(owned) => owned != text,
+            };
+            Ok(Some((working, renormalized)))
         }
     }
 
@@ -1114,11 +1163,10 @@ impl TextCleaner {
     }
 
     fn can_use_ascii_fast_path(&self, text: &str) -> bool {
+        // Tabs need no guard here: the full pipeline preserves buffered
+        // whitespace verbatim when neither trimming nor collapsing, so ASCII
+        // input with tabs round-trips identically on both paths.
         text.is_ascii()
-            // The full pipeline canonicalizes retained tabs to spaces. Letting a
-            // tab bypass it would make the optimization change output, including
-            // when streaming splits otherwise-identical input into chunks.
-            && !text.contains('\t')
             && !self.options.remove_trailing_whitespace
             && !self.options.collapse_whitespace
             && self.options.normalize_line_endings.is_none()
@@ -1351,39 +1399,54 @@ fn classify_emoji_cluster(grapheme: &str, classifier: &EmojiClassifier) -> Emoji
     EmojiClusterContext { is_rendered }
 }
 
-fn flush_pending_whitespace(out: &mut String, pending: usize, collapse: bool) {
-    if pending == 0 {
+fn flush_pending_whitespace(
+    out: &mut String,
+    pending: &str,
+    collapse: bool,
+    changes: &mut u64,
+    stats: &mut CleaningStats,
+) {
+    if pending.is_empty() {
         return;
     }
     if collapse {
+        // Anything other than a lone space is a rewrite: count the characters
+        // removed by the collapse, or 1 when a single tab canonicalizes to a
+        // space. ishuman and --exit-code rely on this being non-zero whenever
+        // the output differs from the input.
+        if pending != " " {
+            let removed = (pending.chars().count() as u64).saturating_sub(1).max(1);
+            record_change!(*changes, stats, whitespace_collapsed, removed);
+        }
         out.push(' ');
     } else {
-        for _ in 0..pending {
-            out.push(' ');
-        }
+        out.push_str(pending);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn flush_or_drop_pending_whitespace(
     out: &mut String,
-    pending: &mut usize,
+    pending: &mut String,
     collapse: bool,
     drop_leading: bool,
     emitted_anything: bool,
+    changes: &mut u64,
+    stats: &mut CleaningStats,
 ) {
-    if *pending == 0 {
+    if pending.is_empty() {
         return;
     }
     if !drop_leading || emitted_anything {
-        flush_pending_whitespace(out, *pending, collapse);
+        flush_pending_whitespace(out, pending, collapse, changes, stats);
     }
-    *pending = 0;
+    pending.clear();
 }
 
 #[allow(clippy::too_many_arguments)]
 fn finish_pending_whitespace_before_break(
     out: &mut String,
-    pending: &mut usize,
+    pending: &mut String,
     cap_next: &mut bool,
     trim: bool,
     collapse: bool,
@@ -1391,16 +1454,24 @@ fn finish_pending_whitespace_before_break(
     stats: &mut CleaningStats,
 ) {
     if trim {
-        if *pending > 0 {
-            record_change!(*changes, stats, trailing_whitespace_removed, *pending);
-            *pending = 0;
-            *cap_next = false;
+        if !pending.is_empty() {
+            record_change!(
+                *changes,
+                stats,
+                trailing_whitespace_removed,
+                pending.chars().count()
+            );
+            pending.clear();
         }
     } else {
-        flush_pending_whitespace(out, *pending, collapse);
-        *pending = 0;
-        *cap_next = false;
+        flush_pending_whitespace(out, pending, collapse, changes, stats);
+        pending.clear();
     }
+    // A line break ends any dropped-cluster whitespace-merge context: leading
+    // whitespace on the next line is indentation, not run continuation. This
+    // must reset even with nothing pending, or batch mode would cap the next
+    // line's indent while streaming (fresh state per line) preserves it.
+    *cap_next = false;
 }
 
 fn is_disallowed_control(c: char) -> bool {
@@ -1968,6 +2039,9 @@ mod tests {
         });
         let out = c.clean("a    b\t\tc");
         assert_eq!(out.text, "a b c");
+        assert!(out.changes_made > 0);
+        #[cfg(feature = "stats")]
+        assert_eq!(out.stats.whitespace_collapsed, 4); // 3 spaces + 1 tab removed
     }
 
     #[test]
@@ -2572,6 +2646,76 @@ mod tests {
         let cleaner = TextCleaner::new(CleaningOptions::minimal());
         let output = cleaner.clean("plain ASCII");
         assert!(matches!(output.text, Cow::Borrowed("plain ASCII")));
+        // Tabs are fast-path safe: the full pipeline preserves them verbatim.
+        let output = cleaner.clean("a\tb");
+        assert!(matches!(output.text, Cow::Borrowed("a\tb")));
+    }
+
+    // ---- F8: every output rewrite must be counted (ishuman contract) ----
+
+    #[test]
+    fn retained_tabs_survive_cleaning_verbatim() {
+        // Tabs are keyboard characters and no option claims the right to
+        // rewrite them; silently spacing them out broke changes_made == 0
+        // detection and mangled tab-indented source under code_safe.
+        for options in [
+            CleaningOptions::default(),
+            CleaningOptions::minimal(),
+            CleaningOptions::code_safe(),
+        ] {
+            let c = TextCleaner::new(options);
+            let out = c.clean("a\tb");
+            assert_eq!(out.text, "a\tb");
+            assert_eq!(out.changes_made, 0);
+        }
+        let code_safe = TextCleaner::new(CleaningOptions::code_safe());
+        assert_eq!(code_safe.clean("\tindent").text, "\tindent");
+    }
+
+    #[test]
+    fn collapse_rewrites_are_counted() {
+        let c = TextCleaner::new(CleaningOptions {
+            collapse_whitespace: true,
+            ..CleaningOptions::minimal()
+        });
+
+        let out = c.clean("a  b");
+        assert_eq!(out.text, "a b");
+        assert_eq!(out.changes_made, 1);
+        #[cfg(feature = "stats")]
+        assert_eq!(out.stats.whitespace_collapsed, 1);
+
+        // A lone tab collapses to a space: zero chars removed, still a rewrite.
+        let out = c.clean("a\tb");
+        assert_eq!(out.text, "a b");
+        assert_eq!(out.changes_made, 1);
+
+        // A lone space is already collapsed; nothing may be counted.
+        let out = c.clean("a b");
+        assert_eq!(out.text, "a b");
+        assert_eq!(out.changes_made, 0);
+    }
+
+    #[cfg(feature = "unorm")]
+    #[test]
+    fn unicode_normalization_rewrites_are_counted() {
+        let c = TextCleaner::new(CleaningOptions {
+            keyboard_only: false,
+            unicode_normalization: UnicodeNormalizationMode::NFC,
+            ..CleaningOptions::default()
+        });
+
+        // e + U+0301 composes under NFC: a real rewrite, must be counted.
+        let out = c.clean("cafe\u{0301}");
+        assert_eq!(out.text, "caf\u{00E9}");
+        assert!(out.changes_made > 0);
+        #[cfg(feature = "stats")]
+        assert_eq!(out.stats.unicode_normalized, 1);
+
+        // Already-NFC input is not a normalization change.
+        let out = c.clean("caf\u{00E9}");
+        assert_eq!(out.text, "caf\u{00E9}");
+        assert_eq!(out.changes_made, 0);
     }
 
     // ---- F4: a dropped emoji is billed once, not also as hidden removals ----

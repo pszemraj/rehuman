@@ -380,7 +380,9 @@ fn minimal_stream_matches_buffered_output_at_unicode_separator() {
     );
     assert!(streamed.status.success(), "{}", stderr_text(&streamed));
 
-    assert_eq!(stdout_text(&buffered), "a\u{2028} ");
+    // minimal neither trims nor collapses, so the tab survives verbatim and
+    // the input round-trips unchanged on both paths.
+    assert_eq!(stdout_text(&buffered), "a\u{2028}\t");
     assert_eq!(stdout_text(&buffered), stdout_text(&streamed));
 
     let _ = fs::remove_dir_all(dir);
@@ -630,6 +632,29 @@ fn code_safe_preset_preserves_diagram_glyphs() {
         "{}",
         stderr_text(&code_safe_check)
     );
+}
+
+#[test]
+fn whitespace_rewrites_drive_exit_codes() {
+    // Tabs survive cleaning verbatim, so tab-bearing input is canonical:
+    // output must match input and ishuman must report clean.
+    let tabbed = "a\tb\n";
+    let cleaned = run_bin("rehuman", &[], Some(tabbed));
+    assert!(cleaned.status.success(), "{}", stderr_text(&cleaned));
+    assert_eq!(stdout_text(&cleaned), tabbed);
+    let check = run_bin("ishuman", &[], Some(tabbed));
+    assert_eq!(check.status.code(), Some(0), "{}", stderr_text(&check));
+
+    // Whitespace collapse is a counted rewrite: ishuman must flag it even
+    // though no character class changes, only run length. (Explicit flag, not
+    // the humanize preset, so this holds without the `unorm` feature.)
+    let collapsible = "a  b\n";
+    let flags = ["--collapse-whitespace", "true"];
+    let collapsed = run_bin("rehuman", &flags, Some(collapsible));
+    assert!(collapsed.status.success(), "{}", stderr_text(&collapsed));
+    assert_eq!(stdout_text(&collapsed), "a b\n");
+    let check = run_bin("ishuman", &flags, Some(collapsible));
+    assert_eq!(check.status.code(), Some(1), "{}", stderr_text(&check));
 }
 
 #[test]

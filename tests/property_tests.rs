@@ -161,6 +161,45 @@ proptest! {
     }
 }
 
+/// Like [`sample_string`], but biased toward spaces/tabs/newlines and plain
+/// ASCII so whitespace buffering, trimming, and collapsing paths are hit.
+fn whitespace_heavy_string() -> impl Strategy<Value = String> {
+    let piece = prop_oneof![
+        3 => proptest::sample::select(vec![' ', '\t', '\n', 'a', 'b']),
+        1 => any::<char>(),
+    ];
+    proptest::collection::vec(piece, 0..64).prop_map(|chars| chars.into_iter().collect())
+}
+
+proptest! {
+    #[test]
+    fn changed_output_is_always_counted(input in whitespace_heavy_string()) {
+        // ishuman, --exit-code, and --inplace all treat changes_made as the
+        // authority on whether cleaning rewrote the text: any preset that
+        // changes the output must report at least one change.
+        for options in [
+            CleaningOptions::default(),
+            CleaningOptions::minimal(),
+            CleaningOptions::balanced(),
+            CleaningOptions::humanize(),
+            CleaningOptions::aggressive(),
+            CleaningOptions::code_safe(),
+        ] {
+            let cleaner = TextCleaner::new(options);
+            // Presets requesting Unicode normalization error without `unorm`.
+            let Ok(result) = cleaner.try_clean(&input) else {
+                continue;
+            };
+            prop_assert!(
+                result.changes_made > 0 || result.text == input,
+                "output differs from input but changes_made == 0 (input {:?} -> output {:?})",
+                input,
+                result.text
+            );
+        }
+    }
+}
+
 proptest! {
     #[test]
     fn cleaning_is_idempotent(input in sample_string()) {

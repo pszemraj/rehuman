@@ -152,11 +152,13 @@ Stats keys, in dict order (matching the Rust `CleaningStats` field order):
 - `hidden_chars_removed`
 - `trailing_whitespace_removed`
 - `spaces_normalized`
+- `whitespace_collapsed` (characters removed by `collapse_whitespace`)
 - `dashes_normalized`
 - `quotes_normalized`
 - `other_normalized`
 - `control_chars_removed`
 - `line_endings_normalized`
+- `unicode_normalized` (1 when Unicode normalization rewrote the text)
 - `non_keyboard_removed`
 - `non_keyboard_transliterated`
 - `emojis_dropped`
