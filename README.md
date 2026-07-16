@@ -12,7 +12,7 @@ Add the Rust library crate:
 
 ```toml
 [dependencies]
-rehuman = "0.1.3" # replace with the latest published version
+rehuman = "0.2.0" # replace with the latest published version
 ```
 
 Install CLI binaries (`rehuman`, `ishuman`):
@@ -20,6 +20,15 @@ Install CLI binaries (`rehuman`, `ishuman`):
 ```bash
 cargo install rehuman
 ```
+
+Or use it from Python: the bindings are on PyPI as
+[`rehuman`](https://pypi.org/project/rehuman/):
+
+```bash
+pip install rehuman
+```
+
+See [python/README.md](python/README.md) for supported platforms and the Python API.
 
 <details>
 <summary><b>Click to Expand:</b> Build from Source</summary>
@@ -55,14 +64,17 @@ let cleaned = clean("Thanks 👍"); // -> "Thanks"
 ```
 
 By default, keyboard-only mode emits ASCII-safe output.
-Non-ASCII text is normalized/transliterated when feasible; unmappable
-characters are removed.
+Non-ASCII text is normalized/transliterated when feasible: Latin diacritics
+fold (`café` -> `cafe`), common symbols map to ASCII equivalents
+(`→` -> `->`, `≠` -> `!=`, `•` -> `-`, `©` -> `(c)`, `✅` -> `[x]`), and Greek
+letters spell out to their names (`λ` -> `lambda`); other unmappable characters
+(emoji, letter scripts like CJK or Cyrillic) are removed, never romanized.
 Tune this with `--non-ascii-policy`, `--extended-keyboard`, and
 `--preserve-joiners` (details in [docs/api.md](docs/api.md#keyboard-only-behavior)
 and [docs/cli.md](docs/cli.md#output-options)).
 For docs/source files where Unicode glyphs matter (for example box-drawing diagrams),
-use the CLI with `--preset code-safe` (or `--keyboard-only false`).
-For detailed semantics and option behavior, use the API reference links below.
+use the CLI with `--preset code-safe`; it keeps glyphs, ellipses, and emoji while
+still normalizing typographic quotes and dashes.
 
 ## Documentation
 
@@ -74,8 +86,8 @@ Primary docs by concern:
   [docs/cli.md](docs/cli.md)
 - Usage recipes:
   [docs/examples.md](docs/examples.md)
-- Python bindings (`import rehuman`):
-  [python/docs/index.md](python/docs/index.md)
+- Python package (`pip install rehuman`):
+  [python/README.md](python/README.md)
 - Roadmap and development notes:
   [docs/development.md](docs/development.md)
 

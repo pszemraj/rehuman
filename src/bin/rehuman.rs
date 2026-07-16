@@ -12,9 +12,7 @@ use clap::{ArgAction, Parser};
 use tempfile::NamedTempFile;
 
 use common::{
-    default_cli_options, default_config_path, load_config, options_from_preset, read_input,
-    validate_emoji_policy_dependency, validate_extended_keyboard_dependency,
-    validate_non_ascii_policy_dependency, write_stats, write_stats_json, ConfigFile,
+    default_config_path, read_input, resolve_options, write_stats, write_stats_json, ConfigFile,
     SerializableOptions, SharedCliOptions, StatsSummary, CONFIG_VERSION, MAX_INPUT_BYTES,
 };
 use rehuman::{CleaningResult, CleaningStats, StreamCleaner, TextCleaner};
@@ -37,30 +35,7 @@ fn main() -> Result<()> {
         }
     }
 
-    let mut options = default_cli_options();
-
-    if let Some(ref path) = config_path {
-        if path.exists() {
-            options = load_config(path)
-                .with_context(|| format!("failed to read config at {}", path.display()))?;
-        }
-    }
-
-    if let Some(preset) = cli.shared.preset {
-        options = options_from_preset(preset);
-    }
-
-    let overrides = cli.shared.to_partial_options();
-    overrides.apply_to(&mut options);
-    validate_emoji_policy_dependency(&options, cli.shared.emoji_policy_specified_by_user())?;
-    validate_non_ascii_policy_dependency(
-        &options,
-        cli.shared.non_ascii_policy_specified_by_user(),
-    )?;
-    validate_extended_keyboard_dependency(
-        &options,
-        cli.shared.extended_keyboard_specified_by_user(),
-    )?;
+    let options = resolve_options(&cli.shared, config_path.as_deref())?;
 
     if cli.save_config {
         if let Some(ref path) = config_path {
@@ -89,10 +64,6 @@ fn main() -> Result<()> {
             return Ok(());
         }
         bail!("no input provided; pass a file path or pipe data into stdin");
-    }
-
-    if cli.inplace && cli.input.is_none() {
-        bail!("'--inplace' requires an explicit file path input");
     }
 
     let cleaner = TextCleaner::new(options.clone());
@@ -221,23 +192,45 @@ where
     W: Write,
 {
     let mut stream = StreamCleaner::new(cleaner.options().clone());
-    let mut buffer = String::new();
+    // Raw bytes not yet handed to the cleaner: at most one incomplete
+    // trailing UTF-8 sequence after each iteration. Reading fixed-size
+    // chunks instead of lines keeps memory bounded even when the input's
+    // only line boundaries are U+2028/U+2029 (no LF byte for read_line).
+    let mut pending = Vec::new();
     let mut chunk_output = String::new();
 
     loop {
-        buffer.clear();
-        let bytes_read = reader
-            .read_line(&mut buffer)
-            .context("failed to read input stream")?;
-        if bytes_read == 0 {
+        let data = reader.fill_buf().context("failed to read input stream")?;
+        if data.is_empty() {
             break;
         }
-        if let Some(result) = stream.feed(&buffer, &mut chunk_output) {
+        let consumed = data.len();
+        pending.extend_from_slice(data);
+        reader.consume(consumed);
+
+        let valid_up_to = match std::str::from_utf8(&pending) {
+            Ok(text) => text.len(),
+            // The chunk ends mid-sequence: keep the tail for the next read.
+            Err(err) if err.error_len().is_none() => err.valid_up_to(),
+            Err(err) => {
+                return Err(err).context("input stream did not contain valid UTF-8");
+            }
+        };
+        if valid_up_to == 0 {
+            continue;
+        }
+        let text = std::str::from_utf8(&pending[..valid_up_to]).expect("prefix validated above");
+        if let Some(result) = stream.feed(text, &mut chunk_output) {
             writer
                 .write_all(result.text.as_bytes())
                 .context("failed to write stream chunk")?;
             chunk_output.clear();
         }
+        pending.drain(..valid_up_to);
+    }
+
+    if !pending.is_empty() {
+        bail!("input stream did not contain valid UTF-8");
     }
 
     if let Some(result) = stream.finish(&mut chunk_output) {
@@ -313,7 +306,12 @@ struct Cli {
     stream: bool,
 
     /// Apply the transformation directly to the input file.
-    #[arg(long = "inplace", action = ArgAction::SetTrue, conflicts_with = "stream")]
+    #[arg(
+        long = "inplace",
+        action = ArgAction::SetTrue,
+        conflicts_with = "stream",
+        requires = "input"
+    )]
     inplace: bool,
 }
 
@@ -326,6 +324,12 @@ mod tests {
     fn clap_rejects_stream_and_inplace_together() {
         let parsed = Cli::try_parse_from(["rehuman", "--stream", "--inplace", "input.txt"]);
         assert!(parsed.is_err(), "expected clap conflict error");
+    }
+
+    #[test]
+    fn clap_rejects_inplace_without_input() {
+        let parsed = Cli::try_parse_from(["rehuman", "--inplace"]);
+        assert!(parsed.is_err(), "expected clap dependency error");
     }
 
     #[test]

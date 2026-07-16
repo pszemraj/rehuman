@@ -88,6 +88,17 @@ def test_stats_contains_expected_keys() -> None:
         assert "bidi_controls_removed" in stats
 
 
+def test_stats_keys_preserve_declaration_order() -> None:
+    """Stats dict keys keep CleaningStats declaration order, not alphabetical."""
+    cleaner = rehuman.Cleaner()
+    result = cleaner.clean("“Hi” — ok…")
+    assert list(result.stats.keys())[:3] == [
+        "hidden_chars_removed",
+        "trailing_whitespace_removed",
+        "spaces_normalized",
+    ]
+
+
 def test_invalid_normalization_raises_value_error() -> None:
     """Invalid normalization mode is rejected with `ValueError`."""
     with pytest.raises(ValueError, match="invalid normalization mode"):
@@ -111,6 +122,14 @@ def test_line_endings_lf() -> None:
     options = rehuman.Options(line_endings="lf")
     result = rehuman.Cleaner(options).clean("a\r\nb\rc\u0085")
     assert result.text == "a\nb\nc\n"
+
+
+@pytest.mark.parametrize("line_endings", [None, "auto", "none"])
+def test_line_ending_preservation_aliases(line_endings: str | None) -> None:
+    """Both names for preserving line endings remain accepted."""
+    options = rehuman.Options(line_endings=line_endings)
+    result = rehuman.Cleaner(options).clean("a\r\nb\rc\n")
+    assert result.text == "a\r\nb\rc\n"
 
 
 def test_unorm_is_available_by_default() -> None:
@@ -183,14 +202,18 @@ def test_presets_minimal_balanced_humanize_aggressive() -> None:
     assert aggressive.clean("Caf\u00e9").text == "Cafe"
 
 
-def test_code_safe_preset_preserves_source_like_text() -> None:
-    """Code-safe preset avoids semantic text rewrites."""
+def test_code_safe_preset_normalizes_quotes_and_dashes() -> None:
+    """Code-safe preset rewrites typographic quotes/dashes but keeps glyphs."""
     code_safe = rehuman.Cleaner(rehuman.Options.code_safe_preset())
     # Keep a literal Rust escape token (`\\u{00A0}`), not the NBSP codepoint.
     source_like = 'let input = "“Hello — world…”\\u{00A0}😀";'
     result = code_safe.clean(source_like)
-    assert result.text == source_like
-    assert result.changes_made == 0
+    assert result.text == 'let input = ""Hello - world…"\\u{00A0}😀";'
+    assert result.changes_made == 3
+
+    # Diagram glyphs, ellipsis, and emoji still pass through untouched.
+    preserved = "├── src/ … 😀"
+    assert code_safe.clean(preserved).text == preserved
 
 
 def test_options_repr_and_result_equality_are_value_based() -> None:
@@ -210,9 +233,37 @@ def test_options_repr_and_result_equality_are_value_based() -> None:
     assert "unicode_normalization='nfkc'" in options_repr
 
     cleaner = rehuman.Cleaner(options)
+    assert repr(cleaner) == "Cleaner(keyboard_only=true, emoji_policy='keep')"
     left = cleaner.clean("e\u0301 👍")
     right = cleaner.clean("e\u0301 👍")
     assert left == right
+    assert str(left) == left.text
+    assert repr(left).startswith("CleaningResult(changes_made=")
+
+
+def test_equality_with_other_types_returns_notimplemented() -> None:
+    """Mixed-type equality follows Python's reflected-comparison protocol."""
+    options = rehuman.Options()
+    result = rehuman.Cleaner(options).clean("text")
+    none_operand = None
+
+    assert options.__eq__(None) is NotImplemented
+    assert result.__eq__("text") is NotImplemented
+    assert not (options == none_operand)
+    assert options != none_operand
+    assert not (result == "text")
+    assert result != "text"
+
+    class ReflectedEquality:
+        seen: object | None = None
+
+        def __eq__(self, other: object) -> bool:
+            self.seen = other
+            return True
+
+    reflected = ReflectedEquality()
+    assert options == reflected
+    assert reflected.seen is options
 
 
 def test_code_safe_preset_removes_hidden_and_control_chars() -> None:
@@ -251,3 +302,58 @@ def test_public_docstrings_present() -> None:
     assert rehuman.Options.__doc__
     assert rehuman.Cleaner.__doc__
     assert rehuman.CleaningResult.__doc__
+
+
+def test_options_getters_mirror_constructor() -> None:
+    """Field getters report the values passed to the constructor."""
+    options = rehuman.Options(
+        keyboard_only=False,
+        keep_emoji=True,
+        non_ascii_policy="fold",
+        line_endings="lf",
+        unicode_normalization="nfc",
+    )
+    assert options.keyboard_only is False
+    assert options.keep_emoji is True
+    assert options.non_ascii_policy == "fold"
+    assert options.line_endings == "lf"
+    assert options.unicode_normalization == "nfc"
+    # Untouched fields keep constructor defaults.
+    assert options.remove_hidden is True
+    assert options.collapse_whitespace is False
+    assert rehuman.Options().line_endings is None
+
+
+def test_options_replace_derives_from_preset() -> None:
+    """replace() copies options with named overrides, leaving the base intact."""
+    base = rehuman.Options.code_safe_preset()
+    derived = base.replace(normalize_other=True, unicode_normalization="nfc")
+    assert derived.normalize_other is True
+    assert derived.unicode_normalization == "nfc"
+    # Preset fields not named in replace() carry over.
+    assert derived.keyboard_only is False
+    assert derived.preserve_joiners is True
+    # The original preset object is unchanged, and no-arg replace is identity.
+    assert base.normalize_other is False
+    assert base.replace() == base
+    assert derived != base
+
+    with pytest.raises(TypeError):
+        base.replace(not_an_option=True)  # type: ignore[call-arg]
+    if not rehuman.HAS_SECURITY:
+        with pytest.raises(TypeError):
+            base.replace(strip_bidi_controls=True)  # type: ignore[call-arg]
+
+
+def test_options_and_cleaner_pickle_roundtrip() -> None:
+    """Options and Cleaner survive pickling (datasets.map / multiprocessing)."""
+    import pickle
+
+    options = rehuman.Options.code_safe_preset().replace(normalize_other=True)
+    restored = pickle.loads(pickle.dumps(options))
+    assert restored == options
+
+    cleaner = rehuman.Cleaner(options)
+    restored_cleaner = pickle.loads(pickle.dumps(cleaner))
+    sample = "“quoted” — text…"
+    assert restored_cleaner.clean(sample).text == cleaner.clean(sample).text

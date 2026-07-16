@@ -15,8 +15,10 @@ Both tools share the same configuration options and support stdin, files, and co
 - [CLI Guide](#cli-guide)
   - [rehuman](#rehuman)
     - [Output Options](#output-options)
+    - [Presets](#presets)
     - [Processing Modes](#processing-modes)
     - [Configuration](#configuration)
+    - [Option Dependency Notes](#option-dependency-notes)
     - [File Size Limit](#file-size-limit)
   - [ishuman](#ishuman)
 
@@ -50,10 +52,11 @@ rehuman --stream < huge.log > huge.clean.log
 
 | Flag                             | Description                                                                                       |
 | -------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `--preset <name>`                | Apply named baseline options: `minimal`, `balanced`, `humanize`, `aggressive`, `code-safe`        |
+| `--preset <name>`                | Apply named baseline options (see [Presets](#presets))                                            |
 | `--keyboard-only=<bool>`         | Restrict output to ASCII keyboard chars (default `true` for CLI)                                  |
 | `--extended-keyboard=<bool>`     | Allow curated non-ASCII keyboard symbols in keyboard-only mode (default `false`)                  |
-| `--keep-emoji`                   | Keep emoji even when keyboard-only is active                                                      |
+| `--keep-emoji`                   | Keep emoji even when keyboard-only is active (shorthand for `--emoji-policy keep`)                |
+| `--emoji-policy <mode>`          | `drop` or `keep` for emoji in keyboard-only mode (default `drop`; conflicts with `--keep-emoji`)  |
 | `--non-ascii-policy <mode>`      | `drop`, `fold`, or `transliterate` for keyboard-only non-ASCII handling (default `transliterate`) |
 | `--preserve-joiners=<bool>`      | Preserve ZWJ/ZWNJ when hidden-character removal is enabled (default `false`)                      |
 | `--unicode-normalization <mode>` | One of `none`, `nfd`, `nfc`, `nfkd`, `nfkc`                                                       |
@@ -61,6 +64,10 @@ rehuman --stream < huge.log > huge.clean.log
 | `--stats`                        | Human-readable statistics to stderr                                                               |
 | `--stats-json`                   | JSON summary to stderr                                                                            |
 | `--exit-code`                    | Exit with status `1` if changes were made                                                         |
+
+When built with the `security` feature, both tools also accept
+`--strip-bidi-controls=<bool>` (default `false`) and both stats formats
+include the `bidi_controls_removed` counter.
 
 Additional boolean overrides accepted by both tools:
 
@@ -73,7 +80,7 @@ Additional boolean overrides accepted by both tools:
 - `--remove-control-chars`
 - `--collapse-whitespace`
 
-Each also accepts explicit values (`true/false`, `1/0`, `yes/no`, `on/off`).
+Each also accepts explicit values (`true/false`, `t/f`, `1/0`, `yes/no`, `y/n`, `on/off`).
 
 ### Presets
 
@@ -85,8 +92,9 @@ Available preset names:
 - `aggressive`
 - `code-safe`
 
-`code-safe` is intended for docs/source-like text where non-ASCII glyphs and
-literal punctuation should be preserved (for example Unicode box-drawing diagrams).
+`code-safe` is intended for docs/source-like text: non-ASCII glyphs (for
+example Unicode box-drawing diagrams), ellipses, and emoji are preserved,
+while typographic quotes and dashes still normalize to ASCII.
 
 Preset precedence:
 
@@ -94,15 +102,14 @@ Preset precedence:
 - `--preset` replaces the baseline options.
 - Explicit option flags (for example `--keyboard-only false`) apply last.
 
-For bulk cleanup of Markdown/code/docs files:
-
-- preferred: `--preset code-safe`
-- fallback: `--keyboard-only false`
+For bulk cleanup of Markdown/code/docs files, use `--preset code-safe`.
+`--keyboard-only false` alone is not a substitute: it also rewrites ellipses
+and strips ZWJ/ZWNJ joiners, which `code-safe` deliberately leaves alone.
 
 ### Processing Modes
 
-- `--stream`: process the input line-by-line (lower memory).
-- `--inplace`: rewrite the input file atomically (uses a temp file).
+- `--stream`: process the input line-by-line (lower memory). Lines are delimited by `\n`; U+2028/U+2029 are also boundaries when space or line-ending normalization folds them to `\n`.
+- `--inplace`: rewrite the input file atomically (uses a temp file). It requires an explicit file path; omitting one is a command-line parse error (exit status `2`).
 - `--stream` and `--inplace` are mutually exclusive.
 
 ### Configuration
@@ -117,8 +124,8 @@ For bulk cleanup of Markdown/code/docs files:
 Configuration files are stored under the platform config directory:
 
 - Linux: `~/.config/rehuman/config.toml`
-- macOS: `~/Library/Application Support/rehuman/config.toml`
-- Windows: `%APPDATA%\rehuman\config.toml`
+- macOS: `~/Library/Application Support/com.rehuman.rehuman/config.toml`
+- Windows: `%APPDATA%\rehuman\rehuman\config\config.toml`
 
 Example `config.toml`:
 
@@ -147,15 +154,15 @@ unicode_normalization = "nfkc"
 - `--keep-emoji` / `--emoji-policy` require keyboard-only mode (`--keyboard-only true`).
 - `--non-ascii-policy` requires keyboard-only mode (`--keyboard-only true`).
 - `--extended-keyboard` requires keyboard-only mode (`--keyboard-only true`).
-- `--print-config` is a standalone mode and conflicts with processing/output flags.
+- `--print-config` is a standalone mode; it conflicts with processing/output flags and with a positional input path.
 
 ### File Size Limit
 
-`rehuman` reads entire inputs into memory by default and rejects files over **5 MiB**. Use `--stream` for larger files.
+The default read-into-memory mode rejects inputs over **5 MiB**. `--stream` and `--inplace` both process the file in bounded memory, so the cap does not apply to them. `ishuman` has the same 5 MiB cap and no streaming mode, so it cannot check larger files.
 
 ## ishuman
 
-Determines if text would change when cleaned. Exits with status `0` when no changes are needed and `1` when the input would be modified. By default no output is printed; add `--stats` or `--json` to learn what would change.
+Determines if text would change when cleaned. Exits with status `0` when no changes are needed and `1` when the input would be modified. By default no output is printed; add `--stats` (human summary, stderr) or `--json` (JSON summary, stdout — unlike `rehuman --stats-json`, which uses stderr because stdout carries the cleaned text) to learn what would change.
 
 ```bash
 # Basic check (inspect exit status)

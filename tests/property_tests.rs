@@ -3,46 +3,21 @@
 use icu_properties::{props, CodePointMapData, CodePointSetData};
 use proptest::prelude::*;
 use rehuman::{clean, is_keyboard_ascii, CleaningOptions, EmojiPolicy, StreamCleaner, TextCleaner};
-use unicode_segmentation::UnicodeSegmentation;
 
 fn sample_string() -> impl Strategy<Value = String> {
     proptest::collection::vec(any::<char>(), 0..64).prop_map(|chars| chars.into_iter().collect())
 }
 
-fn grapheme_is_rendered_emoji(grapheme: &str) -> bool {
-    let chars: Vec<char> = grapheme.chars().collect();
-    let emoji = CodePointSetData::new::<props::Emoji>();
-    let emoji_presentation = CodePointSetData::new::<props::EmojiPresentation>();
-    let extended_pictographic = CodePointSetData::new::<props::ExtendedPictographic>();
-
-    let mut has_emoji_presentation = false;
-    let mut has_extended_pictographic = false;
-    let mut has_emoji = false;
-    let mut has_vs16 = false;
-    let mut has_zwj = false;
-    let mut has_keycap = false;
-
-    for &c in &chars {
-        if emoji_presentation.contains(c) {
-            has_emoji_presentation = true;
-        }
-        if extended_pictographic.contains(c) {
-            has_extended_pictographic = true;
-        }
-        if emoji.contains(c) {
-            has_emoji = true;
-        }
-        match c {
-            '\u{FE0F}' => has_vs16 = true,
-            '\u{200D}' => has_zwj = true,
-            '\u{20E3}' => has_keycap = true,
-            _ => {}
-        }
-    }
-
-    has_emoji_presentation
-        || has_extended_pictographic
-        || (has_emoji && (has_vs16 || has_zwj || has_keycap))
+/// Like [`sample_string`], but seeded with the stream flush boundaries
+/// (LF, CR, U+2028, U+2029) often enough that chunk splits at every kind of
+/// line boundary are actually exercised — `any::<char>()` alone essentially
+/// never emits the separators.
+fn line_boundary_string() -> impl Strategy<Value = String> {
+    let piece = prop_oneof![
+        4 => any::<char>(),
+        1 => proptest::sample::select(vec!['\n', '\r', '\u{2028}', '\u{2029}']),
+    ];
+    proptest::collection::vec(piece, 0..64).prop_map(|chars| chars.into_iter().collect())
 }
 
 #[test]
@@ -136,6 +111,7 @@ fn keyboard_only_reduces_keycap_sequences_to_ascii_digit() {
     });
     let output = cleaner.clean("7️⃣");
     assert_eq!(output.text, "7");
+    #[cfg(feature = "stats")]
     assert!(output.stats.non_keyboard_removed >= 1);
 }
 
@@ -147,6 +123,7 @@ fn keyboard_only_drops_zwj_emoji() {
     });
     let output = cleaner.clean("👨‍👩‍👧‍👦");
     assert_eq!(output.text, "");
+    #[cfg(feature = "stats")]
     assert!(output.stats.emojis_dropped >= 1);
 }
 
@@ -181,42 +158,101 @@ proptest! {
         });
         let output = cleaner.clean(&input);
         prop_assert!(output.text.chars().all(is_keyboard_ascii));
-        let has_rendered_emoji = UnicodeSegmentation::graphemes(output.text.as_ref(), true)
-            .any(grapheme_is_rendered_emoji);
-        prop_assert!(!has_rendered_emoji);
+    }
+}
+
+/// Like [`sample_string`], but biased toward spaces/tabs/newlines and plain
+/// ASCII so whitespace buffering, trimming, and collapsing paths are hit.
+fn whitespace_heavy_string() -> impl Strategy<Value = String> {
+    let piece = prop_oneof![
+        3 => proptest::sample::select(vec![' ', '\t', '\n', 'a', 'b']),
+        1 => any::<char>(),
+    ];
+    proptest::collection::vec(piece, 0..64).prop_map(|chars| chars.into_iter().collect())
+}
+
+proptest! {
+    #[test]
+    fn changed_output_is_always_counted(input in whitespace_heavy_string()) {
+        // ishuman, --exit-code, and --inplace all treat changes_made as the
+        // authority on whether cleaning rewrote the text: any preset that
+        // changes the output must report at least one change.
+        for options in [
+            CleaningOptions::default(),
+            CleaningOptions::minimal(),
+            CleaningOptions::balanced(),
+            CleaningOptions::humanize(),
+            CleaningOptions::aggressive(),
+            CleaningOptions::code_safe(),
+        ] {
+            let cleaner = TextCleaner::new(options);
+            // Presets requesting Unicode normalization error without `unorm`.
+            let Ok(result) = cleaner.try_clean(&input) else {
+                continue;
+            };
+            prop_assert!(
+                result.changes_made > 0 || result.text == input,
+                "output differs from input but changes_made == 0 (input {:?} -> output {:?})",
+                input,
+                result.text
+            );
+        }
     }
 }
 
 proptest! {
     #[test]
-    fn stream_cleaner_matches_batch(input in sample_string()) {
-        let options = CleaningOptions::default();
-        let baseline_cleaner = TextCleaner::new(options.clone());
-        let baseline = baseline_cleaner.clean(&input);
+    fn cleaning_is_idempotent(input in sample_string()) {
+        // clean(x) is already keyboard-safe, so a second pass must be a no-op.
+        // Protects ishuman (which treats clean(x) as canonical) and the symbol
+        // transliteration tables (a mapping that re-triggered processing would
+        // break this).
+        let once = clean(&input).text.into_owned();
+        let twice = clean(&once).text.into_owned();
+        prop_assert_eq!(once, twice);
+    }
+}
 
-        let mut stream_cleaner = StreamCleaner::new(options);
-        let mut out_buffer = String::new();
-        let mut chunk_buffer = String::new();
+proptest! {
+    #[test]
+    fn stream_cleaner_matches_batch(input in line_boundary_string()) {
+        let fast_path_with_unicode_boundaries = CleaningOptions {
+            normalize_spaces: true,
+            ..CleaningOptions::minimal()
+        };
 
-        for ch in input.chars() {
-            let chunk = ch.to_string();
-            if let Some(result) = stream_cleaner.feed(&chunk, &mut chunk_buffer) {
+        for options in [
+            CleaningOptions::default(),
+            CleaningOptions::minimal(),
+            fast_path_with_unicode_boundaries,
+        ] {
+            let baseline_cleaner = TextCleaner::new(options.clone());
+            let baseline = baseline_cleaner.clean(&input);
+
+            let mut stream_cleaner = StreamCleaner::new(options);
+            let mut out_buffer = String::new();
+            let mut chunk_buffer = String::new();
+
+            for ch in input.chars() {
+                let chunk = ch.to_string();
+                if let Some(result) = stream_cleaner.feed(&chunk, &mut chunk_buffer) {
+                    let emitted = result.text.into_owned();
+                    out_buffer.push_str(&emitted);
+                    chunk_buffer.clear();
+                }
+            }
+
+            if let Some(result) = stream_cleaner.finish(&mut chunk_buffer) {
                 let emitted = result.text.into_owned();
                 out_buffer.push_str(&emitted);
                 chunk_buffer.clear();
             }
+
+            let summary = stream_cleaner.summary();
+
+            prop_assert_eq!(out_buffer, baseline.text);
+            prop_assert_eq!(summary.stats, baseline.stats);
+            prop_assert_eq!(summary.changes_made, baseline.changes_made);
         }
-
-        if let Some(result) = stream_cleaner.finish(&mut chunk_buffer) {
-            let emitted = result.text.into_owned();
-            out_buffer.push_str(&emitted);
-            chunk_buffer.clear();
-        }
-
-        let summary = stream_cleaner.summary();
-
-        prop_assert_eq!(out_buffer, baseline.text);
-        prop_assert_eq!(summary.stats, baseline.stats);
-        prop_assert_eq!(summary.changes_made, baseline.changes_made);
     }
 }

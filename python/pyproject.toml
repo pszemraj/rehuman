@@ -18,6 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Text Processing",
     "Topic :: Text Processing :: Filters",
@@ -26,12 +27,13 @@ keywords = ["text", "unicode", "normalization", "cleaning", "llm"]
 
 [project.urls]
 Repository = "https://github.com/pszemraj/rehuman"
-Documentation = "https://docs.rs/rehuman"
+Documentation = "https://github.com/pszemraj/rehuman/blob/main/python/README.md"
+Issues = "https://github.com/pszemraj/rehuman/issues"
 
 [tool.maturin]
 module-name = "rehuman._rehuman"
 python-source = "."
-exclude = ["tests/**", "docs/**"]
+exclude = ["tests/**", "docs/**", "**/__pycache__/**", "**/*.pyc"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

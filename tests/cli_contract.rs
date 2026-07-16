@@ -5,10 +5,16 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static BIN_BUILD_ONCE: OnceLock<()> = OnceLock::new();
+
+// Disambiguates temp dirs created by concurrent test threads: the pid is shared
+// and the clock can tick coarser than a nanosecond, so a timestamp alone can
+// collide and one test's cleanup then deletes another test's files mid-run.
+static TMP_DIR_SEQ: AtomicU64 = AtomicU64::new(0);
 
 fn target_dir() -> PathBuf {
     if let Ok(dir) = env::var("CARGO_TARGET_DIR") {
@@ -92,8 +98,9 @@ fn make_tmp_dir() -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("clock before unix epoch")
         .as_nanos();
+    let seq = TMP_DIR_SEQ.fetch_add(1, Ordering::Relaxed);
     let mut dir = base;
-    dir.push(format!("cli-contract-{}-{stamp}", std::process::id()));
+    dir.push(format!("cli-contract-{}-{stamp}-{seq}", std::process::id()));
     fs::create_dir_all(&dir).expect("failed to create test temp directory");
     dir
 }
@@ -132,6 +139,17 @@ fn rehuman_rejects_stream_and_inplace_combination() {
 }
 
 #[test]
+fn rehuman_rejects_inplace_without_path_at_parse_time() {
+    let output = run_bin("rehuman", &["--inplace"], Some("stdin is not a path"));
+    assert_eq!(output.status.code(), Some(2), "{}", stderr_text(&output));
+    assert!(
+        stderr_text(&output).contains("required arguments were not provided"),
+        "{}",
+        stderr_text(&output)
+    );
+}
+
+#[test]
 fn rehuman_rejects_print_config_with_processing_flags() {
     let output = run_bin("rehuman", &["--print-config", "--stats"], None);
     assert!(!output.status.success());
@@ -143,18 +161,34 @@ fn rehuman_rejects_print_config_with_processing_flags() {
 }
 
 #[test]
-fn rehuman_rejects_explicit_emoji_policy_without_keyboard_mode() {
-    let output = run_bin(
-        "rehuman",
-        &["--keyboard-only", "false", "--emoji-policy", "drop"],
-        None,
-    );
-    assert!(!output.status.success());
-    assert!(
-        stderr_text(&output).contains("keyboard-only mode"),
-        "{}",
-        stderr_text(&output)
-    );
+fn rehuman_rejects_keyboard_dependent_options_without_keyboard_mode() {
+    let cases: &[(&[&str], &str)] = &[
+        (
+            &["--keyboard-only", "false", "--emoji-policy", "drop"],
+            "--emoji-policy",
+        ),
+        (
+            &[
+                "--keyboard-only",
+                "false",
+                "--non-ascii-policy",
+                "transliterate",
+            ],
+            "--non-ascii-policy",
+        ),
+        (
+            &["--keyboard-only", "false", "--extended-keyboard", "true"],
+            "--extended-keyboard",
+        ),
+    ];
+
+    for &(args, flag) in cases {
+        let output = run_bin("rehuman", args, None);
+        let stderr = stderr_text(&output);
+        assert!(!output.status.success(), "{flag} unexpectedly succeeded");
+        assert!(stderr.contains("keyboard-only mode"), "{stderr}");
+        assert!(stderr.contains(flag), "{stderr}");
+    }
 }
 
 #[test]
@@ -162,41 +196,6 @@ fn ishuman_rejects_explicit_emoji_policy_without_keyboard_mode() {
     let output = run_bin(
         "ishuman",
         &["--keyboard-only", "false", "--keep-emoji"],
-        None,
-    );
-    assert!(!output.status.success());
-    assert!(
-        stderr_text(&output).contains("keyboard-only mode"),
-        "{}",
-        stderr_text(&output)
-    );
-}
-
-#[test]
-fn rehuman_rejects_explicit_non_ascii_policy_without_keyboard_mode() {
-    let output = run_bin(
-        "rehuman",
-        &[
-            "--keyboard-only",
-            "false",
-            "--non-ascii-policy",
-            "transliterate",
-        ],
-        None,
-    );
-    assert!(!output.status.success());
-    assert!(
-        stderr_text(&output).contains("keyboard-only mode"),
-        "{}",
-        stderr_text(&output)
-    );
-}
-
-#[test]
-fn rehuman_rejects_extended_keyboard_without_keyboard_mode() {
-    let output = run_bin(
-        "rehuman",
-        &["--keyboard-only", "false", "--extended-keyboard", "true"],
         None,
     );
     assert!(!output.status.success());
@@ -365,6 +364,51 @@ fn stream_output_matches_buffered_output() {
 }
 
 #[test]
+fn minimal_stream_matches_buffered_output_at_unicode_separator() {
+    let dir = make_tmp_dir();
+    let input_path = dir.join("input.txt");
+    write_file(&input_path, "a\u{2028}\t");
+
+    let file_arg = input_path.to_str().expect("utf8 path");
+    let buffered = run_bin("rehuman", &["--preset", "minimal", file_arg], None);
+    assert!(buffered.status.success(), "{}", stderr_text(&buffered));
+
+    let streamed = run_bin(
+        "rehuman",
+        &["--preset", "minimal", "--stream", file_arg],
+        None,
+    );
+    assert!(streamed.status.success(), "{}", stderr_text(&streamed));
+
+    // minimal neither trims nor collapses, so the tab survives verbatim and
+    // the input round-trips unchanged on both paths.
+    assert_eq!(stdout_text(&buffered), "a\u{2028}\t");
+    assert_eq!(stdout_text(&buffered), stdout_text(&streamed));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn stream_handles_unicode_line_separator_delimited_input() {
+    let dir = make_tmp_dir();
+    let input_path = dir.join("input.txt");
+    // No LF byte anywhere: lines are delimited only by U+2028/U+2029, which
+    // stream mode must treat as flush boundaries. The leading run is sized so
+    // the first 8 KiB buffered read ends one byte into the three-byte U+2028,
+    // exercising the incomplete-UTF-8 carry between reads.
+    let prefix = "a".repeat(8191);
+    let content = format!("{prefix}\u{2028}beta\u{2029}gamma");
+    write_file(&input_path, &content);
+
+    let file_arg = input_path.to_str().expect("utf8 path");
+    let streamed = run_bin("rehuman", &["--stream", file_arg], None);
+    assert!(streamed.status.success(), "{}", stderr_text(&streamed));
+    assert_eq!(stdout_text(&streamed), format!("{prefix}\nbeta\ngamma"));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn default_keyboard_mode_folds_latin_diacritics() {
     let out = run_bin("rehuman", &[], Some("Caf\u{00E9} d\u{00E9}j\u{00E0}\n"));
     assert!(out.status.success(), "{}", stderr_text(&out));
@@ -373,9 +417,38 @@ fn default_keyboard_mode_folds_latin_diacritics() {
 
 #[test]
 fn default_keyboard_mode_transliterates_non_decomposing_latin() {
-    let out = run_bin("rehuman", &[], Some("Stra\u{00DF}e \u{00BD}\n"));
+    let out = run_bin("rehuman", &[], Some("Stra\u{00DF}e\n"));
     assert!(out.status.success(), "{}", stderr_text(&out));
-    assert_eq!(stdout_text(&out), "Strasse 1/2\n");
+    assert_eq!(stdout_text(&out), "Strasse\n");
+
+    // ½ -> "1/2" comes from NFKD; the binary is built with the same feature
+    // set as this test, so it only folds fractions when `unorm` is enabled.
+    #[cfg(feature = "unorm")]
+    {
+        let out = run_bin("rehuman", &[], Some("Stra\u{00DF}e \u{00BD}\n"));
+        assert!(out.status.success(), "{}", stderr_text(&out));
+        assert_eq!(stdout_text(&out), "Strasse 1/2\n");
+    }
+}
+
+#[test]
+fn default_keyboard_mode_transliterates_symbols() {
+    // Curated symbol layer: negation preserved, arrows and bullets mapped.
+    // None of these rely on NFKD, so this holds across feature combinations.
+    let out = run_bin("rehuman", &[], Some("a \u{2260} b \u{2192} c \u{2022}\n"));
+    assert!(out.status.success(), "{}", stderr_text(&out));
+    assert_eq!(stdout_text(&out), "a != b -> c -\n");
+
+    #[cfg(feature = "unorm")]
+    {
+        let out = run_bin(
+            "rehuman",
+            &["--unicode-normalization", "nfd"],
+            Some("a \u{2260} b\n"),
+        );
+        assert!(out.status.success(), "{}", stderr_text(&out));
+        assert_eq!(stdout_text(&out), "a != b\n");
+    }
 }
 
 #[test]
@@ -471,6 +544,56 @@ fn stats_json_contract_is_consistent_between_bins() {
 }
 
 #[test]
+fn human_stats_preserve_declaration_order() {
+    // serde_json::to_value uses an object map; without `preserve_order` this
+    // would alphabetize fields instead of keeping CleaningStats declaration
+    // order. Field names print regardless of the `stats` feature (values are
+    // just 0), so this assertion is not feature-gated.
+    let output = run_bin("rehuman", &["--stats"], Some("a\n"));
+    assert!(output.status.success(), "{}", stderr_text(&output));
+
+    let stderr = stderr_text(&output);
+    let hidden = stderr
+        .find("hidden_chars_removed")
+        .expect("missing hidden_chars_removed field in stats output");
+    let trailing = stderr
+        .find("trailing_whitespace_removed")
+        .expect("missing trailing_whitespace_removed field in stats output");
+    let spaces = stderr
+        .find("spaces_normalized")
+        .expect("missing spaces_normalized field in stats output");
+
+    assert!(
+        hidden < trailing && trailing < spaces,
+        "expected struct declaration order (hidden_chars_removed, \
+         trailing_whitespace_removed, spaces_normalized), got: {stderr}"
+    );
+}
+
+#[cfg(feature = "security")]
+#[test]
+fn human_stats_include_security_counters() {
+    let output = run_bin(
+        "rehuman",
+        &[
+            "--stats",
+            "--strip-bidi-controls",
+            "true",
+            "--keyboard-only",
+            "false",
+        ],
+        Some("\u{202e}ab\u{202c}c"),
+    );
+    assert!(output.status.success(), "{}", stderr_text(&output));
+    let expected = if cfg!(feature = "stats") { 2 } else { 0 };
+    assert!(
+        stderr_text(&output).contains(&format!("bidi_controls_removed: {expected}")),
+        "{}",
+        stderr_text(&output)
+    );
+}
+
+#[test]
 fn code_safe_preset_preserves_diagram_glyphs() {
     let diagram = "rehuman/\n├── src/\n│   └── lib.rs\n";
 
@@ -512,24 +635,43 @@ fn code_safe_preset_preserves_diagram_glyphs() {
 }
 
 #[test]
+fn whitespace_rewrites_drive_exit_codes() {
+    // Tabs survive cleaning verbatim, so tab-bearing input is canonical:
+    // output must match input and ishuman must report clean.
+    let tabbed = "a\tb\n";
+    let cleaned = run_bin("rehuman", &[], Some(tabbed));
+    assert!(cleaned.status.success(), "{}", stderr_text(&cleaned));
+    assert_eq!(stdout_text(&cleaned), tabbed);
+    let check = run_bin("ishuman", &[], Some(tabbed));
+    assert_eq!(check.status.code(), Some(0), "{}", stderr_text(&check));
+
+    // Whitespace collapse is a counted rewrite: ishuman must flag it even
+    // though no character class changes, only run length. (Explicit flag, not
+    // the humanize preset, so this holds without the `unorm` feature.)
+    let collapsible = "a  b\n";
+    let flags = ["--collapse-whitespace", "true"];
+    let collapsed = run_bin("rehuman", &flags, Some(collapsible));
+    assert!(collapsed.status.success(), "{}", stderr_text(&collapsed));
+    assert_eq!(stdout_text(&collapsed), "a b\n");
+    let check = run_bin("ishuman", &flags, Some(collapsible));
+    assert_eq!(check.status.code(), Some(1), "{}", stderr_text(&check));
+}
+
+#[test]
 fn code_safe_preset_matches_explicit_safe_flags() {
     let input = "├── docs/\n│   └── api.md\n“quoted” — text… 👍\n";
 
     let preset = run_bin("rehuman", &["--preset", "code-safe"], Some(input));
     assert!(preset.status.success(), "{}", stderr_text(&preset));
+    // Diagram glyphs, ellipsis, and emoji survive; quotes/dashes normalize.
+    assert_eq!(
+        stdout_text(&preset),
+        "├── docs/\n│   └── api.md\n\"quoted\" - text… 👍\n"
+    );
 
     let explicit = run_bin(
         "rehuman",
-        &[
-            "--keyboard-only",
-            "false",
-            "--normalize-dashes",
-            "false",
-            "--normalize-quotes",
-            "false",
-            "--normalize-other",
-            "false",
-        ],
+        &["--keyboard-only", "false", "--normalize-other", "false"],
         Some(input),
     );
     assert!(explicit.status.success(), "{}", stderr_text(&explicit));
