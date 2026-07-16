@@ -90,7 +90,7 @@ Constructor keyword arguments:
 - `collapse_whitespace: bool = False`
 - `line_endings: str | None = None` (`None` / `"auto"` / `"none"` / `"lf"` / `"crlf"` / `"cr"`)
 - `unicode_normalization: str = "none"` (`"none"` / `"nfd"` / `"nfc"` / `"nfkd"` / `"nfkc"`)
-- `strip_bidi_controls: bool = False` (only when `rehuman.HAS_SECURITY` is `True`)
+- `strip_bidi_controls: bool = False` (only when `rehuman.HAS_SECURITY` is `True`; the shipped type stubs match the published wheels and do not declare this keyword)
 
 Presets (each returns an `Options` matching the same-named Rust preset; field
 values are defined in the [Rust builder docs](../../docs/api.md#builder-api)):
@@ -145,6 +145,7 @@ Stats keys, in dict order (matching the Rust `CleaningStats` field order):
 
 - Invalid option strings (for `line_endings` / `unicode_normalization` / `non_ascii_policy`) raise `ValueError`.
 - Cleaner runtime errors from unavailable normalization features are surfaced as `ValueError`.
+- Passing `strip_bidi_controls` when `rehuman.HAS_SECURITY` is `False` raises `TypeError`: the constructor on non-security builds does not accept the keyword at all.
 
 ## Docstrings & Typing
 

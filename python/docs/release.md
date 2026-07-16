@@ -11,7 +11,7 @@ Automation is tag/release-driven and supports both automatic and manual runs.
 Workflow: `.github/workflows/python-release-artifacts.yml`
 
 - Auto trigger: GitHub Release `published`
-- PR trigger: `pull_request` for Python/release-workflow file changes (build/test mode only; no release upload)
+- PR trigger: `pull_request` touching the Rust core (`src/**`, `tests/**`, `build.rs`, `Cargo.toml`/`Cargo.lock`, toolchain files), `python/**`, or the release workflow files (build/test mode only; no release upload)
 - Manual trigger: `workflow_dispatch` with either:
   - `tag` (release asset upload path), or
   - `test_mode=true` and `ref=<branch-or-ref>` (dry-run build path)
@@ -27,7 +27,7 @@ Behavior:
   - `python/pyproject.toml` project name (`rehuman`)
 - In `test_mode`, validates root/python version sync and package name on the selected ref
 - Builds and uploads release artifacts:
-  - Wheels for Linux/macOS/Windows matrix
+  - Wheels for Linux/macOS/Windows matrix (each wheel embeds a maturin-generated CycloneDX SBOM in its `dist-info`)
   - One source distribution (`sdist`)
   - `PYTHON_DIST_MANIFEST.json` (expected wheel/sdist filenames)
   - Deterministic `SHA256SUMS`
@@ -74,6 +74,11 @@ Current Python wheel targets:
 - Linux: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`
 - macOS: `aarch64-apple-darwin`
 - Windows: `x86_64-pc-windows-msvc`
+
+Per-target verification is uneven: the full pytest suite runs on
+`linux-x86_64` and `macos-arm64`; `windows-x86_64` gets an install/import
+smoke test only; `linux-aarch64` is cross-compiled and not executed on the
+build host.
 
 Known limitation:
 
