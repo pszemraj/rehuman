@@ -202,14 +202,18 @@ def test_presets_minimal_balanced_humanize_aggressive() -> None:
     assert aggressive.clean("Caf\u00e9").text == "Cafe"
 
 
-def test_code_safe_preset_preserves_source_like_text() -> None:
-    """Code-safe preset avoids semantic text rewrites."""
+def test_code_safe_preset_normalizes_quotes_and_dashes() -> None:
+    """Code-safe preset rewrites typographic quotes/dashes but keeps glyphs."""
     code_safe = rehuman.Cleaner(rehuman.Options.code_safe_preset())
     # Keep a literal Rust escape token (`\\u{00A0}`), not the NBSP codepoint.
     source_like = 'let input = "“Hello — world…”\\u{00A0}😀";'
     result = code_safe.clean(source_like)
-    assert result.text == source_like
-    assert result.changes_made == 0
+    assert result.text == 'let input = ""Hello - world…"\\u{00A0}😀";'
+    assert result.changes_made == 3
+
+    # Diagram glyphs, ellipsis, and emoji still pass through untouched.
+    preserved = "├── src/ … 😀"
+    assert code_safe.clean(preserved).text == preserved
 
 
 def test_options_repr_and_result_equality_are_value_based() -> None:

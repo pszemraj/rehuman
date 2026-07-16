@@ -73,7 +73,8 @@ Tune this with `--non-ascii-policy`, `--extended-keyboard`, and
 `--preserve-joiners` (details in [docs/api.md](docs/api.md#keyboard-only-behavior)
 and [docs/cli.md](docs/cli.md#output-options)).
 For docs/source files where Unicode glyphs matter (for example box-drawing diagrams),
-use the CLI with `--preset code-safe`.
+use the CLI with `--preset code-safe`; it keeps glyphs, ellipses, and emoji while
+still normalizing typographic quotes and dashes.
 
 ## Documentation
 

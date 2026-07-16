@@ -92,8 +92,9 @@ Available preset names:
 - `aggressive`
 - `code-safe`
 
-`code-safe` is intended for docs/source-like text where non-ASCII glyphs and
-literal punctuation should be preserved (for example Unicode box-drawing diagrams).
+`code-safe` is intended for docs/source-like text: non-ASCII glyphs (for
+example Unicode box-drawing diagrams), ellipses, and emoji are preserved,
+while typographic quotes and dashes still normalize to ASCII.
 
 Preset precedence:
 
@@ -102,9 +103,8 @@ Preset precedence:
 - Explicit option flags (for example `--keyboard-only false`) apply last.
 
 For bulk cleanup of Markdown/code/docs files, use `--preset code-safe`.
-`--keyboard-only false` alone is not a substitute: it only stops non-ASCII
-dropping and still rewrites quotes, dashes, and ellipses, which `code-safe`
-deliberately leaves alone.
+`--keyboard-only false` alone is not a substitute: it also rewrites ellipses
+and strips ZWJ/ZWNJ joiners, which `code-safe` deliberately leaves alone.
 
 ### Processing Modes
 

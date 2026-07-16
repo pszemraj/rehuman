@@ -99,7 +99,7 @@ values are defined in the [Rust builder docs](../../docs/api.md#builder-api)):
 - `Options.balanced_preset()`
 - `Options.humanize_preset()`
 - `Options.aggressive_preset()`
-- `Options.code_safe_preset()`: preserves source/docs text semantics by disabling quote/dash/ellipsis rewrites and turning off keyboard-only dropping.
+- `Options.code_safe_preset()`: for source/docs text; keeps non-ASCII glyphs, ellipses, emoji, and joiners (no keyboard-only dropping) while still normalizing typographic quotes and dashes to ASCII.
 
 `repr(options)` uses the same lowercase Python-facing names accepted by the
 constructor (for example `emoji_policy='keep'`).

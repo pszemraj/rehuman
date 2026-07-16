@@ -305,12 +305,11 @@ impl CleaningOptions {
     /// Code-safe preset for docs/source-like content.
     ///
     /// # Returns
-    /// A preset that preserves semantic punctuation and Unicode glyphs while
-    /// still removing hidden/control noise.
+    /// A preset that preserves Unicode glyphs (box-drawing, emoji, joiners)
+    /// and ellipsis-like punctuation while still removing hidden/control
+    /// noise and normalizing typographic quotes and dashes to ASCII.
     pub fn code_safe() -> Self {
         Self {
-            normalize_dashes: false,
-            normalize_quotes: false,
             normalize_other: false,
             keyboard_only: false,
             emoji_policy: EmojiPolicy::Keep,
@@ -2332,8 +2331,6 @@ mod tests {
         assert_eq!(
             CleaningOptions::code_safe(),
             CleaningOptions {
-                normalize_dashes: false,
-                normalize_quotes: false,
                 normalize_other: false,
                 keyboard_only: false,
                 emoji_policy: EmojiPolicy::Keep,
@@ -2341,6 +2338,19 @@ mod tests {
                 ..CleaningOptions::default()
             }
         );
+    }
+
+    #[test]
+    fn code_safe_normalizes_quotes_and_dashes_but_keeps_glyphs() {
+        let c = TextCleaner::new(CleaningOptions::code_safe());
+        // Typographic quotes/dashes are LLM signatures and must normalize.
+        assert_eq!(
+            c.clean("\u{201C}quoted\u{201D} \u{2014} text").text,
+            "\"quoted\" - text"
+        );
+        // Semantic glyphs, ellipses, and emoji stay untouched.
+        let preserved = "\u{251C}\u{2500}\u{2500} src/ \u{2026} \u{1F600}";
+        assert_eq!(c.clean(preserved).text, preserved);
     }
 
     // ---- F2: negation must never be inverted ----

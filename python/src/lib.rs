@@ -399,8 +399,8 @@ impl Options {
     #[staticmethod]
     /// Code-safe preset for docs/source text.
     ///
-    /// Keeps emoji and non-ASCII characters, and avoids quote/dash/ellipsis
-    /// rewrites so string literals and examples are not semantically altered.
+    /// Keeps emoji, non-ASCII characters, and ellipsis-like punctuation,
+    /// while normalizing typographic quotes and dashes to ASCII.
     fn code_safe_preset() -> Self {
         Self {
             inner: CleaningOptions::code_safe(),

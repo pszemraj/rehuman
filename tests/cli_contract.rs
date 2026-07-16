@@ -638,19 +638,15 @@ fn code_safe_preset_matches_explicit_safe_flags() {
 
     let preset = run_bin("rehuman", &["--preset", "code-safe"], Some(input));
     assert!(preset.status.success(), "{}", stderr_text(&preset));
+    // Diagram glyphs, ellipsis, and emoji survive; quotes/dashes normalize.
+    assert_eq!(
+        stdout_text(&preset),
+        "├── docs/\n│   └── api.md\n\"quoted\" - text… 👍\n"
+    );
 
     let explicit = run_bin(
         "rehuman",
-        &[
-            "--keyboard-only",
-            "false",
-            "--normalize-dashes",
-            "false",
-            "--normalize-quotes",
-            "false",
-            "--normalize-other",
-            "false",
-        ],
+        &["--keyboard-only", "false", "--normalize-other", "false"],
         Some(input),
     );
     assert!(explicit.status.success(), "{}", stderr_text(&explicit));
