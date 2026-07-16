@@ -2257,6 +2257,36 @@ mod tests {
         assert_eq!(out.stats.emojis_dropped, 1);
     }
 
+    // `preset_fields_match_contract` below asserts each preset as a delta
+    // against `CleaningOptions::default()`, so it can't catch drift in
+    // `default()` itself. This test pins every default field absolutely,
+    // with no `..` spread — together the two tests cover each preset's
+    // full resolved value.
+    #[test]
+    fn default_options_match_contract() {
+        assert_eq!(
+            CleaningOptions::default(),
+            CleaningOptions {
+                remove_hidden: true,
+                remove_trailing_whitespace: true,
+                normalize_spaces: true,
+                normalize_dashes: true,
+                normalize_quotes: true,
+                normalize_other: true,
+                keyboard_only: true,
+                extended_keyboard: false,
+                emoji_policy: EmojiPolicy::Drop,
+                non_ascii_policy: NonAsciiPolicy::Transliterate,
+                preserve_joiners: false,
+                remove_control_chars: true,
+                collapse_whitespace: false,
+                normalize_line_endings: None,
+                unicode_normalization: UnicodeNormalizationMode::None,
+                strip_bidi_controls: false,
+            }
+        );
+    }
+
     #[test]
     fn preset_fields_match_contract() {
         assert_eq!(
