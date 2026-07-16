@@ -38,11 +38,11 @@ let fancy = humanize("“Quote”—and…more");         // -> "\"Quote\"-and..
 When `keyboard_only=true`, the cleaner applies this order:
 
 1. Preserve emoji only if `emoji_policy=Keep`.
-2. Handle non-ASCII text by `non_ascii_policy`:
+2. If `extended_keyboard=true`, keep curated non-ASCII keyboard symbols (for example `U+20AC`, `U+00A3`, `U+00A7`, `U+2026`) literally; allowlisted characters never reach the non-ASCII policy (`U+00A3` stays `£` even under `Drop`).
+3. Handle remaining non-ASCII text by `non_ascii_policy`:
    - `Drop`: remove non-ASCII characters.
    - `Fold`: keep compatibility/decomposition-to-ASCII forms.
    - `Transliterate`: fold first, then transliterate remaining non-ASCII where feasible.
-3. If `extended_keyboard=true`, keep curated non-ASCII keyboard symbols (for example `U+20AC`, `U+00A3`, `U+00A7`, `U+2026`) without transliterating.
 4. Remove hidden joiners (ZWJ/ZWNJ) unless `preserve_joiners=true`.
 
 Within `Fold` and `Transliterate`, each non-ASCII character is resolved by the
@@ -57,9 +57,11 @@ most specific rule that produces output:
    combining mark and the bare base is kept.
 2. **NFKD compatibility fold** (both modes): `½` -> `1/2`, `™` -> `TM`,
    fullwidth forms, Roman numerals, and Latin diacritics (`é` -> `e`).
-3. **Curated symbol table** (`Transliterate` only): common arrows, math and
-   relational operators, bullets, geometric shapes, check marks, letterlike
-   marks, and Latin-1 punctuation (`→` -> `->`, `⇒` -> `==>`, `≤` -> `<=`,
+3. **Curated symbol table** (`Transliterate` only): Latin letters NFKD cannot
+   reduce (`ß` -> `ss`), common arrows, math and relational operators, bullets,
+   geometric shapes, check marks, letterlike marks, technical/keyboard keys
+   (`⌘` -> `Cmd`, `⎋` -> `Esc`), and Latin-1 punctuation (`→` -> `->`,
+   `⇒` -> `==>`, `≤` -> `<=`,
    `•` -> `-`, `✓` -> `[x]`, `©` -> `(c)`, `®` -> `(r)`, `£` -> `GBP`,
    `§` -> `S`). A handful of meaning-bearing emoji marks are included even
    though they are Emoji-classified, because they carry pass/fail/alert
@@ -141,7 +143,7 @@ println!("dashes normalized: {}", result.stats.dashes_normalized);
 | `emoji_policy`               | Control emoji in `keyboard_only` mode (`Drop`/`Keep`)             |
 | `non_ascii_policy`           | Non-ASCII strategy in `keyboard_only` mode (`Drop`/`Fold`/`Transliterate`) |
 | `preserve_joiners`           | Preserve ZWJ/ZWNJ when hidden-character removal is enabled         |
-| `remove_control_chars`       | Drop control chars except `\n`, `\r`, `\t`                        |
+| `remove_control_chars`       | Drop control chars except `\n`, `\r`, `\t`; `keyboard_only` strips ASCII controls regardless of this flag (billed as non-keyboard removals) |
 | `collapse_whitespace`        | Collapse consecutive spaces/tabs to a single space                |
 | `normalize_line_endings`     | Force LF/CRLF/CR output                                           |
 | `unicode_normalization`      | Unicode normalization mode (`None`, `NFD`, `NFC`, `NFKD`, `NFKC`) |

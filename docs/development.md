@@ -8,7 +8,7 @@
 - [x] Expand transliteration coverage beyond Latin-focused defaults (curated symbol table + scoped `deunicode` fallback for arrows, math operators, bullets, shapes, and letterlike marks)
 - [ ] Tune script-specific mappings (letter scripts currently drop by design; script-aware opt-in transliteration is unexplored)
 - [ ] Extend `extended_keyboard` coverage with script-specific opt-in profiles
-- [ ] Tune preset-level defaults for `preserve_joiners` in script-sensitive contexts
+- [ ] Tune `preserve_joiners` preset defaults for script-sensitive contexts beyond `code-safe` (which already preserves joiners)
 - [ ] Handle additional ellipsis/compatibility punctuation variants
 - [ ] Automated Unicode data refresh (script + CI)
 - [ ] Benchmark suite (contributions welcome)
