@@ -364,6 +364,29 @@ fn stream_output_matches_buffered_output() {
 }
 
 #[test]
+fn minimal_stream_matches_buffered_output_at_unicode_separator() {
+    let dir = make_tmp_dir();
+    let input_path = dir.join("input.txt");
+    write_file(&input_path, "a\u{2028}\t");
+
+    let file_arg = input_path.to_str().expect("utf8 path");
+    let buffered = run_bin("rehuman", &["--preset", "minimal", file_arg], None);
+    assert!(buffered.status.success(), "{}", stderr_text(&buffered));
+
+    let streamed = run_bin(
+        "rehuman",
+        &["--preset", "minimal", "--stream", file_arg],
+        None,
+    );
+    assert!(streamed.status.success(), "{}", stderr_text(&streamed));
+
+    assert_eq!(stdout_text(&buffered), "a\u{2028} ");
+    assert_eq!(stdout_text(&buffered), stdout_text(&streamed));
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn stream_handles_unicode_line_separator_delimited_input() {
     let dir = make_tmp_dir();
     let input_path = dir.join("input.txt");

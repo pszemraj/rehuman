@@ -1116,6 +1116,10 @@ impl TextCleaner {
 
     fn can_use_ascii_fast_path(&self, text: &str) -> bool {
         text.is_ascii()
+            // The full pipeline canonicalizes retained tabs to spaces. Letting a
+            // tab bypass it would make the optimization change output, including
+            // when streaming splits otherwise-identical input into chunks.
+            && !text.contains('\t')
             && !self.options.remove_trailing_whitespace
             && !self.options.collapse_whitespace
             && self.options.normalize_line_endings.is_none()
@@ -1150,10 +1154,9 @@ pub struct StreamSummary {
     pub changes_made: u64,
 }
 
-/// Characters that end a flushable chunk: LF plus U+2028 LINE SEPARATOR and
-/// U+2029 PARAGRAPH SEPARATOR, which batch cleaning folds to `\n` under
-/// `normalize_spaces`. All three are hard grapheme-cluster breaks, so a chunk
-/// split after any of them cleans identically to the unsplit text.
+/// Potential flush boundaries: LF plus U+2028 LINE SEPARATOR and U+2029
+/// PARAGRAPH SEPARATOR. The Unicode separators are boundaries only when the
+/// configured cleaner folds them to `\n`; otherwise only LF is flushable.
 const STREAM_FLUSH_BOUNDARIES: [char; 3] = ['\n', '\u{2028}', '\u{2029}'];
 
 /// Incremental cleaner that processes text in line-delimited chunks.
@@ -1200,9 +1203,10 @@ impl StreamCleaner {
         }
     }
 
-    /// Feed one input chunk and emit cleaned output only after a line
-    /// boundary (LF, U+2028 LINE SEPARATOR, or U+2029 PARAGRAPH SEPARATOR)
-    /// is available.
+    /// Feed one input chunk and emit cleaned output only after a line boundary
+    /// is available. LF is always a boundary; U+2028 LINE SEPARATOR and U+2029
+    /// PARAGRAPH SEPARATOR are boundaries when the configured options normalize
+    /// them to newlines.
     ///
     /// # Arguments
     /// - `chunk`: Incoming text data.
@@ -1224,7 +1228,13 @@ impl StreamCleaner {
             return None;
         }
         self.buffer.push_str(chunk);
-        let last_boundary = self.buffer.rfind(STREAM_FLUSH_BOUNDARIES)?;
+        let unicode_separators_are_line_breaks = self.cleaner.options().normalize_spaces
+            || self.cleaner.options().normalize_line_endings.is_some();
+        let last_boundary = if unicode_separators_are_line_breaks {
+            self.buffer.rfind(STREAM_FLUSH_BOUNDARIES)
+        } else {
+            self.buffer.rfind('\n')
+        }?;
         let boundary_len = self.buffer[last_boundary..]
             .chars()
             .next()
@@ -2497,6 +2507,42 @@ mod tests {
             let mut tail = String::new();
             let finished = stream.finish(&mut tail).expect("buffered remainder");
             assert_eq!(finished.text, "beta");
+        }
+    }
+
+    #[test]
+    fn stream_cleaner_matches_batch_for_fast_path_options() {
+        for sep in ['\u{2028}', '\u{2029}'] {
+            for normalize_spaces in [false, true] {
+                let options = CleaningOptions {
+                    normalize_spaces,
+                    ..CleaningOptions::minimal()
+                };
+                let input = format!("a{sep}\t");
+                let baseline = TextCleaner::new(options.clone()).clean(&input);
+                let mut stream = StreamCleaner::new(options);
+                let mut chunk_output = String::new();
+                let mut streamed = String::new();
+
+                let flushed = stream.feed(&input, &mut chunk_output);
+                assert_eq!(
+                    flushed.is_some(),
+                    normalize_spaces,
+                    "U+{:04X} boundary behavior must follow normalize_spaces",
+                    sep as u32
+                );
+                if let Some(result) = flushed {
+                    streamed.push_str(result.text.as_ref());
+                }
+                if let Some(result) = stream.finish(&mut chunk_output) {
+                    streamed.push_str(result.text.as_ref());
+                }
+
+                let summary = stream.summary();
+                assert_eq!(streamed, baseline.text);
+                assert_eq!(summary.stats, baseline.stats);
+                assert_eq!(summary.changes_made, baseline.changes_made);
+            }
         }
     }
 
