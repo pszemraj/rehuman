@@ -49,7 +49,11 @@ most specific rule that produces output:
 
 1. **Meaning-preserving overrides** (both modes): the negated relational
    operators `≠`/`≮`/`≯` map to `!=`/`!<`/`!>`. (Their NFKD decomposition would
-   otherwise strip the negation and silently invert the comparison.)
+   otherwise strip the negation and silently invert the comparison.) The
+   decomposed forms are negated the same way: a `U+0338` combining overlay
+   following an emitted relational tail (`=` + `U+0338` -> `!=`,
+   `≤` + `U+0338` -> `!<=`). Under `Drop`, the overlay strips like any other
+   combining mark and the bare base is kept.
 2. **NFKD compatibility fold** (both modes): `½` -> `1/2`, `™` -> `TM`,
    fullwidth forms, Roman numerals, and Latin diacritics (`é` -> `e`).
 3. **Curated symbol table** (`Transliterate` only): common arrows, math and

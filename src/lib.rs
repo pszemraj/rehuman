@@ -1509,6 +1509,21 @@ fn rewrite_cluster_to_keyboard_ascii(
             continue;
         }
 
+        // U+0338 COMBINING LONG SOLIDUS OVERLAY negates the operator it sits
+        // on. Decomposed input ("=" + U+0338, the canonical decomposition of
+        // `≠`) never reaches compat_override — the ASCII base was already
+        // emitted above — so stripping the overlay like any other mark would
+        // silently invert the comparison. Negate the emitted tail instead.
+        // Drop mode keeps plain mark-stripping, mirroring how it reduces
+        // decomposed diacritics to their base letters.
+        if c == '\u{0338}'
+            && !matches!(policy, NonAsciiPolicy::Drop)
+            && negate_relational_tail(&mut out)
+        {
+            non_ascii_transliterated = non_ascii_transliterated.saturating_add(1);
+            continue;
+        }
+
         // Precedence, most-specific first:
         //   1. compat_override  — meaning-preserving ASCII for chars whose NFKD
         //      would silently invert sense (`≠` -> `=`). Runs in BOTH Fold and
@@ -1654,6 +1669,43 @@ fn compat_override(c: char) -> Option<&'static str> {
         '\u{226F}' => "!>", // ≯ NOT GREATER-THAN (NFKD -> ">")
         _ => return None,
     })
+}
+
+/// Negate the relational tail already emitted into `out`, for a U+0338
+/// COMBINING LONG SOLIDUS OVERLAY following its base (decomposed `≠`/`≮`/`≯`
+/// and friends). The maximal trailing run of `=`/`<`/`>` must exactly match a
+/// known operator so the result agrees with the precomposed mappings: `=` +
+/// overlay -> `!=` like `≠`, `<=` (emitted for `≤`) -> `!<=` like `≰`, `===`
+/// (emitted for `≡`) -> `!==` like `≢`. A run preceded by `-` is an arrow
+/// shaft (`<->`), not a relation, and is left alone. Returns whether the tail
+/// was rewritten; on false the overlay falls through to normal mark handling.
+fn negate_relational_tail(out: &mut String) -> bool {
+    const NEGATIONS: &[(&str, &str)] = &[
+        ("===", "!=="),
+        ("<=", "!<="),
+        (">=", "!>="),
+        ("=", "!="),
+        ("<", "!<"),
+        (">", "!>"),
+    ];
+    let Some(run_start) = out
+        .char_indices()
+        .rev()
+        .take_while(|&(_, c)| matches!(c, '=' | '<' | '>'))
+        .last()
+        .map(|(index, _)| index)
+    else {
+        return false;
+    };
+    if out[..run_start].ends_with('-') {
+        return false;
+    }
+    let Some(&(_, negated)) = NEGATIONS.iter().find(|&&(run, _)| run == &out[run_start..]) else {
+        return false;
+    };
+    out.truncate(run_start);
+    out.push_str(negated);
+    true
 }
 
 /// Curated symbol -> ASCII overrides for glyphs where the automatic layers get
@@ -2283,6 +2335,46 @@ mod tests {
         );
         // compat_override runs before NFKD in Fold too, so ≠ stays "!=", not "=".
         assert_eq!(fold.clean("a \u{2260} b").text, "a != b");
+    }
+
+    #[test]
+    fn decomposed_negated_operators_are_not_inverted() {
+        // ASCII base + U+0338 is the canonical decomposition of ≠/≮/≯. The
+        // base is keyboard-allowed and already emitted when the overlay is
+        // seen, so it must negate the emitted tail, not strip like other marks.
+        let c = TextCleaner::new(CleaningOptions::default());
+        assert_eq!(c.clean("a =\u{0338} b").text, "a != b"); // was "a = b"
+        assert_eq!(c.clean("a <\u{0338} b").text, "a !< b");
+        assert_eq!(c.clean("a >\u{0338} b").text, "a !> b");
+        #[cfg(feature = "stats")]
+        assert!(c.clean("a =\u{0338} b").stats.non_keyboard_transliterated >= 1);
+
+        // Tails emitted by earlier mappings negate to the same ASCII as the
+        // precomposed forms: ≤ + overlay is decomposed ≰ ("!<="), ≡ + overlay
+        // is decomposed ≢ ("!==").
+        assert_eq!(c.clean("a \u{2264}\u{0338} b").text, "a !<= b");
+        assert_eq!(c.clean("a \u{2261}\u{0338} b").text, "a !== b");
+
+        // Fold preserves negation too, matching the precomposed compat_override.
+        let fold = TextCleaner::new(
+            CleaningOptions::builder()
+                .non_ascii_policy(NonAsciiPolicy::Fold)
+                .build(),
+        );
+        assert_eq!(fold.clean("a =\u{0338} b").text, "a != b");
+
+        // Drop keeps plain mark-stripping by design (the same rule that
+        // reduces decomposed diacritics to their base letters).
+        let drop = TextCleaner::new(
+            CleaningOptions::builder()
+                .non_ascii_policy(NonAsciiPolicy::Drop)
+                .build(),
+        );
+        assert_eq!(drop.clean("a =\u{0338} b").text, "a = b");
+
+        // Non-relational tails are untouched; the overlay strips as usual.
+        assert_eq!(c.clean("b\u{0338}").text, "b");
+        assert_eq!(c.clean("a \u{2194}\u{0338} b").text, "a <-> b"); // arrow shaft, not a relation
     }
 
     #[cfg(feature = "unorm")]
