@@ -1803,8 +1803,8 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         '\u{25C7}' => "<>",
         '\u{2713}' => "[x]", // deunicode: "OK"
         '\u{2714}' => "[x]", // deunicode: "checkmark"
-        '\u{2717}' => "[ ]",
-        '\u{2718}' => "[ ]",
+        '\u{2717}' => "x",   // ballot x: "wrong/failed", not "unchecked"
+        '\u{2718}' => "x",
         '\u{2611}' => "[x]", // emoji-classified
         '\u{25AA}' => "-",   // small squares used as list bullets (emoji-classified)
         '\u{25AB}' => "-",
@@ -1813,8 +1813,8 @@ fn symbol_translit(c: char) -> Option<&'static str> {
         //     LLMs rely on. Curated entries win over the emoji drop; pictorial
         //     emoji still drop. EmojiPolicy::Keep still keeps these as-is. ---
         '\u{2705}' => "[x]", // white heavy check mark
-        '\u{274C}' => "[ ]", // cross mark
-        '\u{274E}' => "[ ]", // negative squared cross mark
+        '\u{274C}' => "x",   // cross mark: "failed", so not "[ ]" (= "not done")
+        '\u{274E}' => "x",   // negative squared cross mark
         '\u{2716}' => "x",   // heavy multiplication x
         '\u{26A0}' => "[!]", // warning sign
         '\u{2757}' => "!",
@@ -2466,7 +2466,9 @@ mod tests {
     fn semantic_emoji_marks_transliterate() {
         let c = TextCleaner::new(CleaningOptions::default());
         assert_eq!(c.clean("\u{2705} tests pass").text, "[x] tests pass");
-        assert_eq!(c.clean("\u{274C} build fails").text, "[ ] build fails");
+        // Cross marks mean "failed", not "unchecked": `x`, never `[ ]`.
+        assert_eq!(c.clean("\u{274C} build fails").text, "x build fails");
+        assert_eq!(c.clean("\u{2717} wrong").text, "x wrong");
         assert_eq!(c.clean("\u{26A0}\u{FE0F} careful").text, "[!] careful"); // with VS16
         assert_eq!(c.clean("\u{2B50}\u{2B50}\u{2B50}").text, "***");
         assert_eq!(c.clean("done\u{2757}").text, "done!");

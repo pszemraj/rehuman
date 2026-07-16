@@ -62,7 +62,7 @@ most specific rule that produces output:
    `•` -> `-`, `✓` -> `[x]`, `©` -> `(c)`, `®` -> `(r)`, `£` -> `GBP`,
    `§` -> `S`). A handful of meaning-bearing emoji marks are included even
    though they are Emoji-classified, because they carry pass/fail/alert
-   semantics: `✅` -> `[x]`, `❌` -> `[ ]`, `⚠` -> `[!]`, `❗` -> `!`,
+   semantics: `✅` -> `[x]`, `❌` -> `x`, `⚠` -> `[!]`, `❗` -> `!`,
    `❓` -> `?`, `⭐` -> `*`.
 4. **Greek letter names** (`Transliterate` only): Greek letters spell out to
    their English names (`λ` -> `lambda`, `Δ` -> `Delta`, `π` -> `pi`) because
