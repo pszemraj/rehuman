@@ -241,6 +241,31 @@ def test_options_repr_and_result_equality_are_value_based() -> None:
     assert repr(left).startswith("CleaningResult(changes_made=")
 
 
+def test_equality_with_other_types_returns_notimplemented() -> None:
+    """Mixed-type equality follows Python's reflected-comparison protocol."""
+    options = rehuman.Options()
+    result = rehuman.Cleaner(options).clean("text")
+    none_operand = None
+
+    assert options.__eq__(None) is NotImplemented
+    assert result.__eq__("text") is NotImplemented
+    assert not (options == none_operand)
+    assert options != none_operand
+    assert not (result == "text")
+    assert result != "text"
+
+    class ReflectedEquality:
+        seen: object | None = None
+
+        def __eq__(self, other: object) -> bool:
+            self.seen = other
+            return True
+
+    reflected = ReflectedEquality()
+    assert options == reflected
+    assert reflected.seen is options
+
+
 def test_code_safe_preset_removes_hidden_and_control_chars() -> None:
     """Code-safe preset still strips hidden and control characters."""
     code_safe = rehuman.Cleaner(rehuman.Options.code_safe_preset())

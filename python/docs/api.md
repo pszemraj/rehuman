@@ -114,8 +114,7 @@ Deriving and inspecting options:
 - Every constructor keyword is also a read-only attribute
   (`options.keyboard_only`, `options.non_ascii_policy`, ...) reporting the
   resolved value. `strip_bidi_controls` is readable only on security builds.
-- `Options` compares by value (`==`) and pickles; unknown keywords in
-  `replace()` raise `TypeError`, matching the constructor.
+- `Options` compares by value (`==`) and pickles; comparisons with other types return `NotImplemented` internally so Python can apply its normal reflected/fallback behavior instead of raising `TypeError`; unknown keywords in `replace()` raise `TypeError`, matching the constructor.
 
 `repr(options)` uses the same lowercase Python-facing names accepted by the
 constructor (for example `emoji_policy='keep'`).
@@ -144,8 +143,7 @@ Returned by `Cleaner.clean`.
 - `changes_made: int`
 - `stats: dict[str, int]`
 
-`CleaningResult` compares by value, converts to its cleaned text with `str()`,
-and is truthy when `changes_made > 0`.
+`CleaningResult` compares by value, returns `NotImplemented` internally for operands of other types, converts to its cleaned text with `str()`, and is truthy when `changes_made > 0`.
 
 Stats keys, in dict order (matching the Rust `CleaningStats` field order):
 

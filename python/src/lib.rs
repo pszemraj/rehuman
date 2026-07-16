@@ -207,6 +207,9 @@ struct CleaningResult {
 
 #[pymethods]
 impl CleaningResult {
+    // PyO3's rich-comparison slot converts a failed `PyRef` extraction to
+    // `NotImplemented`, allowing Python to try reflected comparison. Keep the
+    // typed parameter so value equality remains limited to this class.
     fn __eq__(&self, other: PyRef<'_, CleaningResult>) -> bool {
         self.text == other.text
             && self.changes_made == other.changes_made
@@ -510,6 +513,9 @@ impl Options {
         Ok(Self { inner })
     }
 
+    // PyO3's rich-comparison slot converts a failed `PyRef` extraction to
+    // `NotImplemented`, allowing Python to try reflected comparison. Keep the
+    // typed parameter so value equality remains limited to this class.
     fn __eq__(&self, other: PyRef<'_, Options>) -> bool {
         self.inner == other.inner
     }
