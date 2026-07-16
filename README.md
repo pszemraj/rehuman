@@ -21,7 +21,7 @@ Install CLI binaries (`rehuman`, `ishuman`):
 cargo install rehuman
 ```
 
-Or use it from Python — the bindings are on PyPI as
+Or use it from Python: the bindings are on PyPI as
 [`rehuman`](https://pypi.org/project/rehuman/):
 
 ```bash
@@ -64,7 +64,7 @@ let cleaned = clean("Thanks 👍"); // -> "Thanks"
 ```
 
 By default, keyboard-only mode emits ASCII-safe output.
-Non-ASCII text is normalized/transliterated when feasible — Latin diacritics
+Non-ASCII text is normalized/transliterated when feasible: Latin diacritics
 fold (`café` -> `cafe`), common symbols map to ASCII equivalents
 (`→` -> `->`, `≠` -> `!=`, `•` -> `-`, `©` -> `(c)`, `✅` -> `[x]`), and Greek
 letters spell out to their names (`λ` -> `lambda`); other unmappable characters

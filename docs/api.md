@@ -163,7 +163,7 @@ let options = CleaningOptions::builder()
     .build();
 ```
 
-The presets (`minimal`, `balanced`, `humanize`, `aggressive`, `code_safe`) are defined as focused overrides of `CleaningOptions::default()`. A contract test pins every `CleaningOptions::default()` field absolutely, and the preset contract asserts each preset's overrides relative to that baseline — together they pin each preset's full resolved value while keeping shared defaults centralized.
+The presets (`minimal`, `balanced`, `humanize`, `aggressive`, `code_safe`) are defined as focused overrides of `CleaningOptions::default()`. A contract test pins every `CleaningOptions::default()` field absolutely, and the preset contract asserts each preset's overrides relative to that baseline; together they pin each preset's full resolved value while keeping shared defaults centralized.
 When the optional `security` feature is enabled, you can opt into bidi-control stripping via `.strip_bidi_controls(true)` on the builder.
 
 ### Cleaning Statistics
