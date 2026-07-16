@@ -18,4 +18,4 @@ security = ["rehuman/security"]
 [dependencies]
 pyo3 = { version = "0.28.2", features = ["abi3-py39"] }
 rehuman = { path = "..", default-features = false }
-serde_json = "1.0.145"
+serde_json = { version = "1.0.145", features = ["preserve_order"] }

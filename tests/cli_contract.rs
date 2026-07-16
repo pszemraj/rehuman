@@ -541,6 +541,33 @@ fn stats_json_contract_is_consistent_between_bins() {
     assert_eq!(rehuman_json, ishuman_json);
 }
 
+#[test]
+fn human_stats_preserve_declaration_order() {
+    // serde_json::to_value uses an object map; without `preserve_order` this
+    // would alphabetize fields instead of keeping CleaningStats declaration
+    // order. Field names print regardless of the `stats` feature (values are
+    // just 0), so this assertion is not feature-gated.
+    let output = run_bin("rehuman", &["--stats"], Some("a\n"));
+    assert!(output.status.success(), "{}", stderr_text(&output));
+
+    let stderr = stderr_text(&output);
+    let hidden = stderr
+        .find("hidden_chars_removed")
+        .expect("missing hidden_chars_removed field in stats output");
+    let trailing = stderr
+        .find("trailing_whitespace_removed")
+        .expect("missing trailing_whitespace_removed field in stats output");
+    let spaces = stderr
+        .find("spaces_normalized")
+        .expect("missing spaces_normalized field in stats output");
+
+    assert!(
+        hidden < trailing && trailing < spaces,
+        "expected struct declaration order (hidden_chars_removed, \
+         trailing_whitespace_removed, spaces_normalized), got: {stderr}"
+    );
+}
+
 #[cfg(feature = "security")]
 #[test]
 fn human_stats_include_security_counters() {

@@ -88,6 +88,17 @@ def test_stats_contains_expected_keys() -> None:
         assert "bidi_controls_removed" in stats
 
 
+def test_stats_keys_preserve_declaration_order() -> None:
+    """Stats dict keys keep CleaningStats declaration order, not alphabetical."""
+    cleaner = rehuman.Cleaner()
+    result = cleaner.clean("“Hi” — ok…")
+    assert list(result.stats.keys())[:3] == [
+        "hidden_chars_removed",
+        "trailing_whitespace_removed",
+        "spaces_normalized",
+    ]
+
+
 def test_invalid_normalization_raises_value_error() -> None:
     """Invalid normalization mode is rejected with `ValueError`."""
     with pytest.raises(ValueError, match="invalid normalization mode"):
