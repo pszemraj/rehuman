@@ -185,45 +185,49 @@ fn main() {
     .unwrap();
 }
 
-/// Map every Greek-script character that NFKD-reduces to one of the 24 base
-/// letters onto that letter's English name (capitalized for uppercase bases).
-/// Accented monotonic/polytonic forms reduce via mark stripping; math symbol
-/// variants (theta symbol, phi symbol, ...) reduce via their compatibility
-/// decompositions. Characters that don't reduce to a base letter (archaic
-/// letters, Coptic, standalone breathing marks) are omitted and keep dropping.
+/// Map every Greek-script character and Common-script compatibility form that
+/// NFKD-reduces to one of the 24 base letters onto that letter's English name
+/// (capitalized for uppercase bases). Accented monotonic/polytonic forms reduce
+/// via mark stripping; mathematical alphanumeric and Greek symbol variants
+/// reduce via their compatibility decompositions. Characters that don't reduce
+/// to a base letter (archaic letters, Coptic, standalone breathing marks) are
+/// omitted and keep dropping.
 fn build_greek_entries() -> Vec<(char, String)> {
     let gc = CodePointMapData::<GeneralCategory>::new();
     let mut entries = Vec::new();
 
-    for range in CodePointMapData::<Script>::new().iter_ranges_for_value(Script::Greek) {
-        for codepoint in range {
-            let Some(ch) = char::from_u32(codepoint) else {
-                continue;
-            };
-            // NFKD, keep everything that is not a combining mark, then fold
-            // the sigma variants (final/lunate) onto the base sigma.
-            let source = ch.to_string();
-            let mut bases = source
-                .nfkd()
-                .filter(|&d| gc.get(d) != GeneralCategory::NonspacingMark)
-                .map(|d| match d {
-                    '\u{03C2}' | '\u{03F2}' => '\u{03C3}', // ς, ϲ -> σ
-                    other => other,
-                });
-            let (Some(base), None) = (bases.next(), bases.next()) else {
-                continue;
-            };
-            let lowered = base.to_lowercase().next().unwrap_or(base);
-            let Some(&(_, name)) = GREEK_BASE_NAMES.iter().find(|&&(b, _)| b == lowered) else {
-                continue;
-            };
-            if base.is_uppercase() {
-                let mut capitalized = String::with_capacity(name.len());
-                capitalized.push(name.chars().next().unwrap().to_ascii_uppercase());
-                capitalized.push_str(&name[1..]);
-                entries.push((ch, format!("\"{capitalized}\"")));
-            } else {
-                entries.push((ch, format!("\"{name}\"")));
+    let scripts = CodePointMapData::<Script>::new();
+    for script in [Script::Greek, Script::Common] {
+        for range in scripts.iter_ranges_for_value(script) {
+            for codepoint in range {
+                let Some(ch) = char::from_u32(codepoint) else {
+                    continue;
+                };
+                // NFKD, keep everything that is not a combining mark, then fold
+                // the sigma variants (final/lunate) onto the base sigma.
+                let source = ch.to_string();
+                let mut bases = source
+                    .nfkd()
+                    .filter(|&d| gc.get(d) != GeneralCategory::NonspacingMark)
+                    .map(|d| match d {
+                        '\u{03C2}' | '\u{03F2}' => '\u{03C3}', // ς, ϲ -> σ
+                        other => other,
+                    });
+                let (Some(base), None) = (bases.next(), bases.next()) else {
+                    continue;
+                };
+                let lowered = base.to_lowercase().next().unwrap_or(base);
+                let Some(&(_, name)) = GREEK_BASE_NAMES.iter().find(|&&(b, _)| b == lowered) else {
+                    continue;
+                };
+                if base.is_uppercase() {
+                    let mut capitalized = String::with_capacity(name.len());
+                    capitalized.push(name.chars().next().unwrap().to_ascii_uppercase());
+                    capitalized.push_str(&name[1..]);
+                    entries.push((ch, format!("\"{capitalized}\"")));
+                } else {
+                    entries.push((ch, format!("\"{name}\"")));
+                }
             }
         }
     }

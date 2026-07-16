@@ -2355,6 +2355,7 @@ mod tests {
         assert_eq!(c.clean("\u{03A3} over \u{03C3}").text, "Sigma over sigma");
         assert_eq!(c.clean("\u{03D5}").text, "phi"); // math phi symbol variant
         assert_eq!(c.clean("\u{03AD}").text, "epsilon"); // monotonic accented
+        assert_eq!(c.clean("\u{1D6FC} = 1").text, "alpha = 1"); // math italic alpha
     }
 
     // ---- Meaning-bearing emoji marks transliterate; pictures still drop ----
