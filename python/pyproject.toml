@@ -26,7 +26,8 @@ keywords = ["text", "unicode", "normalization", "cleaning", "llm"]
 
 [project.urls]
 Repository = "https://github.com/pszemraj/rehuman"
-Documentation = "https://docs.rs/rehuman"
+Documentation = "https://github.com/pszemraj/rehuman/blob/main/python/README.md"
+Issues = "https://github.com/pszemraj/rehuman/issues"
 
 [tool.maturin]
 module-name = "rehuman._rehuman"
