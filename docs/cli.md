@@ -80,7 +80,7 @@ Additional boolean overrides accepted by both tools:
 - `--remove-control-chars`
 - `--collapse-whitespace`
 
-Each also accepts explicit values (`true/false`, `1/0`, `yes/no`, `on/off`).
+Each also accepts explicit values (`true/false`, `t/f`, `1/0`, `yes/no`, `y/n`, `on/off`).
 
 ### Presets
 
@@ -101,10 +101,10 @@ Preset precedence:
 - `--preset` replaces the baseline options.
 - Explicit option flags (for example `--keyboard-only false`) apply last.
 
-For bulk cleanup of Markdown/code/docs files:
-
-- preferred: `--preset code-safe`
-- fallback: `--keyboard-only false`
+For bulk cleanup of Markdown/code/docs files, use `--preset code-safe`.
+`--keyboard-only false` alone is not a substitute: it only stops non-ASCII
+dropping and still rewrites quotes, dashes, and ellipses, which `code-safe`
+deliberately leaves alone.
 
 ### Processing Modes
 
@@ -124,8 +124,8 @@ For bulk cleanup of Markdown/code/docs files:
 Configuration files are stored under the platform config directory:
 
 - Linux: `~/.config/rehuman/config.toml`
-- macOS: `~/Library/Application Support/rehuman/config.toml`
-- Windows: `%APPDATA%\rehuman\config.toml`
+- macOS: `~/Library/Application Support/com.rehuman.rehuman/config.toml`
+- Windows: `%APPDATA%\rehuman\rehuman\config\config.toml`
 
 Example `config.toml`:
 
@@ -154,15 +154,15 @@ unicode_normalization = "nfkc"
 - `--keep-emoji` / `--emoji-policy` require keyboard-only mode (`--keyboard-only true`).
 - `--non-ascii-policy` requires keyboard-only mode (`--keyboard-only true`).
 - `--extended-keyboard` requires keyboard-only mode (`--keyboard-only true`).
-- `--print-config` is a standalone mode and conflicts with processing/output flags.
+- `--print-config` is a standalone mode; it conflicts with processing/output flags and with a positional input path.
 
 ### File Size Limit
 
-`rehuman` reads entire inputs into memory by default and rejects files over **5 MiB**. Use `--stream` for larger files.
+The default read-into-memory mode rejects inputs over **5 MiB**. `--stream` and `--inplace` both process the file in bounded memory, so the cap does not apply to them. `ishuman` has the same 5 MiB cap and no streaming mode, so it cannot check larger files.
 
 ## ishuman
 
-Determines if text would change when cleaned. Exits with status `0` when no changes are needed and `1` when the input would be modified. By default no output is printed; add `--stats` or `--json` to learn what would change.
+Determines if text would change when cleaned. Exits with status `0` when no changes are needed and `1` when the input would be modified. By default no output is printed; add `--stats` (human summary, stderr) or `--json` (JSON summary, stdout — unlike `rehuman --stats-json`, which uses stderr because stdout carries the cleaned text) to learn what would change.
 
 ```bash
 # Basic check (inspect exit status)

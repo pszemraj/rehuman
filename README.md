@@ -73,7 +73,7 @@ Tune this with `--non-ascii-policy`, `--extended-keyboard`, and
 `--preserve-joiners` (details in [docs/api.md](docs/api.md#keyboard-only-behavior)
 and [docs/cli.md](docs/cli.md#output-options)).
 For docs/source files where Unicode glyphs matter (for example box-drawing diagrams),
-use the CLI with `--preset code-safe` (or `--keyboard-only false`).
+use the CLI with `--preset code-safe`.
 
 ## Documentation
 
