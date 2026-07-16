@@ -277,3 +277,58 @@ def test_public_docstrings_present() -> None:
     assert rehuman.Options.__doc__
     assert rehuman.Cleaner.__doc__
     assert rehuman.CleaningResult.__doc__
+
+
+def test_options_getters_mirror_constructor() -> None:
+    """Field getters report the values passed to the constructor."""
+    options = rehuman.Options(
+        keyboard_only=False,
+        keep_emoji=True,
+        non_ascii_policy="fold",
+        line_endings="lf",
+        unicode_normalization="nfc",
+    )
+    assert options.keyboard_only is False
+    assert options.keep_emoji is True
+    assert options.non_ascii_policy == "fold"
+    assert options.line_endings == "lf"
+    assert options.unicode_normalization == "nfc"
+    # Untouched fields keep constructor defaults.
+    assert options.remove_hidden is True
+    assert options.collapse_whitespace is False
+    assert rehuman.Options().line_endings is None
+
+
+def test_options_replace_derives_from_preset() -> None:
+    """replace() copies options with named overrides, leaving the base intact."""
+    base = rehuman.Options.code_safe_preset()
+    derived = base.replace(normalize_other=True, unicode_normalization="nfc")
+    assert derived.normalize_other is True
+    assert derived.unicode_normalization == "nfc"
+    # Preset fields not named in replace() carry over.
+    assert derived.keyboard_only is False
+    assert derived.preserve_joiners is True
+    # The original preset object is unchanged, and no-arg replace is identity.
+    assert base.normalize_other is False
+    assert base.replace() == base
+    assert derived != base
+
+    with pytest.raises(TypeError):
+        base.replace(not_an_option=True)  # type: ignore[call-arg]
+    if not rehuman.HAS_SECURITY:
+        with pytest.raises(TypeError):
+            base.replace(strip_bidi_controls=True)  # type: ignore[call-arg]
+
+
+def test_options_and_cleaner_pickle_roundtrip() -> None:
+    """Options and Cleaner survive pickling (datasets.map / multiprocessing)."""
+    import pickle
+
+    options = rehuman.Options.code_safe_preset().replace(normalize_other=True)
+    restored = pickle.loads(pickle.dumps(options))
+    assert restored == options
+
+    cleaner = rehuman.Cleaner(options)
+    restored_cleaner = pickle.loads(pickle.dumps(cleaner))
+    sample = "“quoted” — text…"
+    assert restored_cleaner.clean(sample).text == cleaner.clean(sample).text

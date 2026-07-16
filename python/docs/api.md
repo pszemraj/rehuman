@@ -101,6 +101,22 @@ values are defined in the [Rust builder docs](../../docs/api.md#builder-api)):
 - `Options.aggressive_preset()`
 - `Options.code_safe_preset()`: for source/docs text; keeps non-ASCII glyphs, ellipses, emoji, and joiners (no keyboard-only dropping) while still normalizing typographic quotes and dashes to ASCII.
 
+Deriving and inspecting options:
+
+- `replace(**kwargs) -> Options`: returns a copy with the named fields
+  replaced; accepts the same keyword arguments as the constructor. This is
+  how you derive from a preset without restating it:
+
+  ```python
+  options = rehuman.Options.code_safe_preset().replace(normalize_other=True)
+  ```
+
+- Every constructor keyword is also a read-only attribute
+  (`options.keyboard_only`, `options.non_ascii_policy`, ...) reporting the
+  resolved value. `strip_bidi_controls` is readable only on security builds.
+- `Options` compares by value (`==`) and pickles; unknown keywords in
+  `replace()` raise `TypeError`, matching the constructor.
+
 `repr(options)` uses the same lowercase Python-facing names accepted by the
 constructor (for example `emoji_policy='keep'`).
 
@@ -114,6 +130,11 @@ Reusable cleaner instance.
 `repr(cleaner)` reports `keyboard_only` and the lowercase emoji policy.
 
 Use `Cleaner` when you need counters/stats, not just cleaned text.
+
+`Cleaner` pickles (it reconstructs as `Cleaner(options)`), so instances work
+with `multiprocessing` and libraries that fingerprint their inputs by
+serializing them. `clean` releases the GIL while the Rust pipeline runs, so
+thread pools scale across cores.
 
 ### `CleaningResult`
 
