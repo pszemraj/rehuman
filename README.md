@@ -21,6 +21,15 @@ Install CLI binaries (`rehuman`, `ishuman`):
 cargo install rehuman
 ```
 
+Or use it from Python — the bindings are on PyPI as
+[`rehuman`](https://pypi.org/project/rehuman/):
+
+```bash
+pip install rehuman
+```
+
+See [python/README.md](python/README.md) for supported platforms and the Python API.
+
 <details>
 <summary><b>Click to Expand:</b> Build from Source</summary>
 
@@ -65,7 +74,6 @@ Tune this with `--non-ascii-policy`, `--extended-keyboard`, and
 and [docs/cli.md](docs/cli.md#output-options)).
 For docs/source files where Unicode glyphs matter (for example box-drawing diagrams),
 use the CLI with `--preset code-safe` (or `--keyboard-only false`).
-For detailed semantics and option behavior, use the API reference links below.
 
 ## Documentation
 
@@ -77,8 +85,8 @@ Primary docs by concern:
   [docs/cli.md](docs/cli.md)
 - Usage recipes:
   [docs/examples.md](docs/examples.md)
-- Python bindings (`import rehuman`):
-  [python/docs/index.md](python/docs/index.md)
+- Python package (`pip install rehuman`):
+  [python/README.md](python/README.md)
 - Roadmap and development notes:
   [docs/development.md](docs/development.md)
 

@@ -23,4 +23,4 @@
 ## Documentation
 
 - Rust docs index: [README](../README.md#documentation)
-- Python docs index: [python/docs/index.md](../python/docs/index.md)
+- Python package docs: [python/README.md](../python/README.md)

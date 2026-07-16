@@ -1,6 +1,9 @@
 # Python API Reference
 
-Behavior reference for the `rehuman` Python package.
+Behavior reference for the `rehuman` Python package
+([PyPI](https://pypi.org/project/rehuman/)). Installation, wheel coverage, and
+quickstart live in the [package README](../README.md); the underlying option
+semantics are defined by the Rust core in [docs/api.md](../../docs/api.md).
 
 ## Module
 
@@ -11,8 +14,8 @@ import rehuman
 Top-level metadata/constants:
 
 - `rehuman.__version__: str`
-- `rehuman.HAS_STATS: bool`
-- `rehuman.HAS_SECURITY: bool`
+- `rehuman.HAS_STATS: bool`: whether the native module was built with per-operation counters (`True` on published wheels; `False` means `stats` values stay `0` while `changes_made` remains accurate).
+- `rehuman.HAS_SECURITY: bool`: whether bidi-control stripping is available (`False` on published wheels; `strip_bidi_controls` and the `bidi_controls_removed` stat require a custom build with the `security` feature).
 
 ## `clean` vs `humanize`
 
@@ -81,7 +84,7 @@ Constructor keyword arguments:
 - `keyboard_only: bool = True`
 - `extended_keyboard: bool = False`
 - `keep_emoji: bool = False`
-- `non_ascii_policy: str = "transliterate"` (`"drop"` / `"fold"` / `"transliterate"`; `"transliterate"` also maps common symbols to ASCII — `→` -> `->`, `≠` -> `!=`, `©` -> `(c)`, `✅` -> `[x]` — and spells Greek letters out to their names (`λ` -> `lambda`), while other letter scripts and pictorial emoji still drop)
+- `non_ascii_policy: str = "transliterate"` (`"drop"` / `"fold"` / `"transliterate"`; resolution order, symbol/Greek mappings, and what still drops are specified in [Keyboard-Only Behavior](../../docs/api.md#keyboard-only-behavior))
 - `preserve_joiners: bool = False`
 - `remove_control_chars: bool = True`
 - `collapse_whitespace: bool = False`
@@ -89,7 +92,8 @@ Constructor keyword arguments:
 - `unicode_normalization: str = "none"` (`"none"` / `"nfd"` / `"nfc"` / `"nfkd"` / `"nfkc"`)
 - `strip_bidi_controls: bool = False` (only when `rehuman.HAS_SECURITY` is `True`)
 
-Presets:
+Presets (each returns an `Options` matching the same-named Rust preset; field
+values are defined in the [Rust builder docs](../../docs/api.md#builder-api)):
 
 - `Options.minimal_preset()`
 - `Options.balanced_preset()`
@@ -122,7 +126,7 @@ Returned by `Cleaner.clean`.
 `CleaningResult` compares by value, converts to its cleaned text with `str()`,
 and is truthy when `changes_made > 0`.
 
-Stats keys:
+Stats keys, in dict order (matching the Rust `CleaningStats` field order):
 
 - `hidden_chars_removed`
 - `trailing_whitespace_removed`
