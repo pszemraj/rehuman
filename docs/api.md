@@ -2,6 +2,7 @@
 
 This document describes Rust library behavior (`rehuman` crate): defaults, options, presets, stats, and error handling.
 For CLI usage, see [CLI Guide](cli.md). For recipes, see [Examples](examples.md).
+For the Python bindings, see the [Python API Reference](../python/docs/api.md).
 
 ---
 

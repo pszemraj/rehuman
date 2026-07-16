@@ -15,8 +15,10 @@ Both tools share the same configuration options and support stdin, files, and co
 - [CLI Guide](#cli-guide)
   - [rehuman](#rehuman)
     - [Output Options](#output-options)
+    - [Presets](#presets)
     - [Processing Modes](#processing-modes)
     - [Configuration](#configuration)
+    - [Option Dependency Notes](#option-dependency-notes)
     - [File Size Limit](#file-size-limit)
   - [ishuman](#ishuman)
 
@@ -50,10 +52,11 @@ rehuman --stream < huge.log > huge.clean.log
 
 | Flag                             | Description                                                                                       |
 | -------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `--preset <name>`                | Apply named baseline options: `minimal`, `balanced`, `humanize`, `aggressive`, `code-safe`        |
+| `--preset <name>`                | Apply named baseline options (see [Presets](#presets))                                            |
 | `--keyboard-only=<bool>`         | Restrict output to ASCII keyboard chars (default `true` for CLI)                                  |
 | `--extended-keyboard=<bool>`     | Allow curated non-ASCII keyboard symbols in keyboard-only mode (default `false`)                  |
-| `--keep-emoji`                   | Keep emoji even when keyboard-only is active                                                      |
+| `--keep-emoji`                   | Keep emoji even when keyboard-only is active (shorthand for `--emoji-policy keep`)                |
+| `--emoji-policy <mode>`          | `drop` or `keep` for emoji in keyboard-only mode (default `drop`; conflicts with `--keep-emoji`)  |
 | `--non-ascii-policy <mode>`      | `drop`, `fold`, or `transliterate` for keyboard-only non-ASCII handling (default `transliterate`) |
 | `--preserve-joiners=<bool>`      | Preserve ZWJ/ZWNJ when hidden-character removal is enabled (default `false`)                      |
 | `--unicode-normalization <mode>` | One of `none`, `nfd`, `nfc`, `nfkd`, `nfkc`                                                       |
@@ -62,8 +65,9 @@ rehuman --stream < huge.log > huge.clean.log
 | `--stats-json`                   | JSON summary to stderr                                                                            |
 | `--exit-code`                    | Exit with status `1` if changes were made                                                         |
 
-When built with the `security` feature, both stats formats include the
-`bidi_controls_removed` counter.
+When built with the `security` feature, both tools also accept
+`--strip-bidi-controls=<bool>` (default `false`) and both stats formats
+include the `bidi_controls_removed` counter.
 
 Additional boolean overrides accepted by both tools:
 
